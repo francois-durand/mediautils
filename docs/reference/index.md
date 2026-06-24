@@ -1,7 +1,8 @@
 # Reference
 
 :::{toctree}
-my_class_1
-my_class_2
-my_class_3
+file_name
+image
+video
+media
 :::

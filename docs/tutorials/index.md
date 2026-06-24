@@ -1,6 +1,4 @@
 # Tutorials
 
 :::{toctree}
-tutorial
-answer
 :::

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**mediautils** is a Python library for managing photo and video files — updating metadata from standardized file names (and vice-versa), sorting photos by orientation. It is scaffolded from the [Package Helper 3](https://balouf.github.io/package-helper-3/) Cookiecutter template. Currently at v0.1.0 with placeholder classes; the real media-utils logic is being built out.
+**mediautils** is a Python library for managing photo and video files — updating metadata from standardized file names (and vice-versa), sorting photos by orientation. Scaffolded from [Package Helper 3](https://balouf.github.io/package-helper-3/).
 
 ## Build & Development
 
@@ -35,13 +35,11 @@ uv run sphinx-build docs docs/_build/html   # Build docs locally
 ## Architecture
 
 - `mediautils/file_name.py` — file name parsing (datetime/date extraction from standardized and WhatsApp names)
-- `mediautils/image.py` — image metadata manipulation (EXIF `datetime_original`)
+- `mediautils/image.py` — image operations (EXIF metadata, orientation detection, resize, batch dispatch)
 - `mediautils/video.py` — video metadata manipulation (MP4 `creation_time` via ffmpeg)
-- `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_wa_files`)
+- `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_wa_files`, `process_directory_files`, `process_standard_files`)
 - `mediautils/cli.py` — Click-based CLI entry point (registered as `mediautils` console script)
-- `mediautils/sub_package_1/` and `sub_package_2/` — template placeholder classes
 - `tests/` — pytest tests (also tests the CLI via `click.testing.CliRunner`)
-- `legacy_notebooks/` — old Jupyter notebooks being migrated into the package
 
 ## Design Principles
 

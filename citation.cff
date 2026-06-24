@@ -1,0 +1,15 @@
+
+cff-version: 1.2.0
+title: Media Utils
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - family-names: Durand
+    given-names: François
+    email: fradurandpub@gmail.com
+repository-code: "https://github.com/francois-durand/mediautils/"
+url: "https://francois-durand.github.io/mediautils/"
+abstract: A small toolbox of utilities for managing photo and video files.
+license: MIT

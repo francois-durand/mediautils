@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mediautils"
+version = "0.1.0"
+description = "A small toolbox of utilities for managing photo and video files."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "François Durand", email = "fradurandpub@gmail.com"}
+]
+maintainers = [
+    {name = "François Durand", email = "fradurandpub@gmail.com"}
+]
+license = "MIT"
+dependencies = [
+"click>=8.1.8",
+
+]
+
+[project.urls]
+Repository = "https://github.com/francois-durand/mediautils"
+Documentation = "https://francois-durand.github.io/mediautils"
+
+[dependency-groups]
+dev = [
+    "ipython>=9.0.0",
+    "myst-parser[linkify]>=5.0.0",
+    "nbsphinx>=0.9.7",
+    "pydata-sphinx-theme>=0.16.1",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.0",
+    "sphinx-copybutton>=0.5.2"
+]
+
+[project.scripts]
+mediautils = 'mediautils.cli:main'
+
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.coverage.report]
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == '__main__':",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["mediautils"]
+
+[tool.coverage.html]
+directory = "cov"
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules --cov --cov-config=pyproject.toml --cov-report xml --cov-report html --showlocals --capture=no --exitfirst --failed-first"

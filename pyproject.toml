@@ -17,7 +17,7 @@ maintainers = [
 license = "MIT"
 dependencies = [
 "click>=8.1.8",
-
+"exif>=1.6.0",
 ]
 
 [project.urls]

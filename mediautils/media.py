@@ -2,7 +2,7 @@ import os
 from datetime import datetime, time
 from pathlib import Path
 
-from mediautils.file_name import wa_file_name_to_date
+from mediautils.file_name import file_name_to_datetime, wa_file_name_to_date
 from mediautils.image import set_time_image
 from mediautils.video import set_time_video
 
@@ -49,6 +49,39 @@ def set_time(
     if ext in _VIDEO_EXTENSIONS:
         return set_time_video(path, dt, out_dir=out_dir, out_name=out_name)
     raise ValueError(f"Unsupported file extension: {ext}")
+
+
+def process_standard_files(
+    in_dir: str | os.PathLike = "in",
+    out_dir: str | os.PathLike = "out",
+) -> list[Path]:
+    """Process files with standardized names: set timestamps from file names.
+
+    For each file in `in_dir` whose name starts with ``YYYYMMDD_HHMMSS``,
+    writes a copy to `out_dir` with metadata matching the datetime encoded
+    in the file name.
+
+    Parameters
+    ----------
+    in_dir : str | os.PathLike
+        Directory containing media files with standardized names.
+    out_dir : str | os.PathLike
+        Directory where processed files are saved.
+
+    Returns
+    -------
+    list[Path]
+        Paths to the output files.
+    """
+    in_dir = Path(in_dir)
+    results = []
+    for path in sorted(in_dir.iterdir()):
+        if not path.is_file():
+            continue
+        dt = file_name_to_datetime(path)
+        result = set_time(path, dt, out_dir=out_dir)
+        results.append(result)
+    return results
 
 
 def process_wa_files(

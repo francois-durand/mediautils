@@ -6,6 +6,7 @@
 [![Documentation Status](https://github.com/francois-durand/mediautils/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/francois-durand/mediautils/actions?query=workflow%3Adocs)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Coverage](https://codecov.io/gh/francois-durand/mediautils/branch/main/graphs/badge.svg)](https://codecov.io/gh/francois-durand/mediautils/tree/main)
+[![SWH](https://archive.softwareheritage.org/badge/origin/https://github.com/YOUR_USERNAME/YOUR_REPO/)](https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/YOUR_USERNAME/YOUR_REPO)
 
 A small toolbox of utilities for managing photo and video files.
 
@@ -17,7 +18,8 @@ A small toolbox of utilities for managing photo and video files.
 
 ## Features
 
-- TODO
+- Update metadata from standardized file name, and vice-versa.
+- Sort photos depending on orientation.
 
 ## Quickstart
 

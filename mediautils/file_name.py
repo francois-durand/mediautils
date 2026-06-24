@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 _PATTERN = re.compile(r"^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})")
+_DATE_PREFIX_PATTERN = re.compile(r"^(\d{4})(\d{2})(\d{2})")
 _WA_PATTERN = re.compile(r"^(?:IMG|VID)-(\d{4})(\d{2})(\d{2})-")
 
 
@@ -67,6 +68,40 @@ def file_name_to_datetime(path: str | os.PathLike) -> datetime:
         datetime.datetime(2025, 1, 1, 12, 0)
     """
     return _file_name_to_datetime(Path(path).stem)
+
+
+def _date_prefix_to_date(name: str) -> date:
+    """Extract a date from a string starting with ``YYYYMMDD``.
+
+    Parameters
+    ----------
+    name : str
+        A string starting with ``YYYYMMDD``.
+
+    Returns
+    -------
+    date
+
+    Raises
+    ------
+    ValueError
+        If `name` does not start with 8 digits forming a valid date.
+
+    Examples
+    --------
+        >>> _date_prefix_to_date("20240229blabla")
+        datetime.date(2024, 2, 29)
+
+        >>> _date_prefix_to_date("20240703")
+        datetime.date(2024, 7, 3)
+    """
+    match = _DATE_PREFIX_PATTERN.match(name)
+    if not match:
+        raise ValueError(
+            f"Name does not match expected format 'YYYYMMDD...': {name}"
+        )
+    year, month, day = (int(g) for g in match.groups())
+    return date(year=year, month=month, day=day)
 
 
 def _wa_file_name_to_date(name: str) -> date:

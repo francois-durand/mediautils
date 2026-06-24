@@ -28,13 +28,24 @@ Sphinx docs live in `docs/`, built with pydata-sphinx-theme. Source files are My
 uv run sphinx-build docs docs/_build/html   # Build docs locally
 ```
 
+## System Dependencies
+
+- **ffmpeg** must be on `PATH` for video metadata operations (`set_time_video`).
+
 ## Architecture
 
-- `mediautils/` — main package, publicly exports `MyClass1`, `MyClass2`, `MyClass3` from `__init__.py`
+- `mediautils/file_name.py` — file name parsing (datetime/date extraction from standardized and WhatsApp names)
+- `mediautils/image.py` — image metadata manipulation (EXIF `datetime_original`)
+- `mediautils/video.py` — video metadata manipulation (MP4 `creation_time` via ffmpeg)
+- `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_wa_files`)
 - `mediautils/cli.py` — Click-based CLI entry point (registered as `mediautils` console script)
-- `mediautils/sub_package_1/` and `sub_package_2/` — subpackages containing the class implementations
+- `mediautils/sub_package_1/` and `sub_package_2/` — template placeholder classes
 - `tests/` — pytest tests (also tests the CLI via `click.testing.CliRunner`)
-- `legacy_notebooks/` — old Jupyter notebooks (not part of the package)
+- `legacy_notebooks/` — old Jupyter notebooks being migrated into the package
+
+## Design Principles
+
+- **No in-place modification**: functions write copies to an output directory, never modify source files.
 
 ## CI
 

@@ -3,7 +3,10 @@
 from importlib.metadata import metadata
 
 from mediautils.file_name import file_name_to_datetime as file_name_to_datetime
+from mediautils.file_name import wa_file_name_to_date as wa_file_name_to_date
 from mediautils.image import set_time_image as set_time_image
+from mediautils.media import process_wa_files as process_wa_files
+from mediautils.media import set_time as set_time
 from mediautils.sub_package_1.my_class_1 import MyClass1 as MyClass1
 from mediautils.sub_package_2.my_class_2 import MyClass2 as MyClass2
 from mediautils.sub_package_2.my_class_3 import MyClass3 as MyClass3

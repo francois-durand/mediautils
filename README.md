@@ -6,7 +6,7 @@
 [![Documentation Status](https://github.com/francois-durand/mediautils/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/francois-durand/mediautils/actions?query=workflow%3Adocs)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Coverage](https://codecov.io/gh/francois-durand/mediautils/branch/main/graphs/badge.svg)](https://codecov.io/gh/francois-durand/mediautils/tree/main)
-[![SWH](https://archive.softwareheritage.org/badge/origin/https://github.com/YOUR_USERNAME/YOUR_REPO/)](https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/YOUR_USERNAME/YOUR_REPO)
+[![SWH](https://archive.softwareheritage.org/badge/origin/https://github.com/francois-durand/mediautils/)](https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/francois-durand/mediautils)
 
 A small toolbox of utilities for managing photo and video files.
 
@@ -31,11 +31,10 @@ $ pip install mediautils
 
 Use Media Utils in a Python project:
 
-```pycon
->>> from mediautils import MyClass1
->>> my_object = MyClass1(a=5, b=3)
->>> my_object.addition()
-8
+```python
+from mediautils import process_standard_files
+
+process_standard_files("in", "out")
 ```
 
 ## Credits

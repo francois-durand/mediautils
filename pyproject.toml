@@ -18,6 +18,7 @@ license = "MIT"
 dependencies = [
 "click>=8.1.8",
 "exif>=1.6.0",
+"moviepy>=2.0.0",
 "Pillow>=11.0.0",
 ]
 

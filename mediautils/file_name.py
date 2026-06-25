@@ -39,7 +39,9 @@ def _file_name_to_datetime(name: str) -> datetime:
             f"File name does not match expected format 'YYYYMMDD_HHMMSS...': {name}"
         )
     year, month, day, hour, minute, second = (int(g) for g in match.groups())
-    return datetime(year=year, month=month, day=day, hour=hour, minute=minute, second=second)
+    return datetime(
+        year=year, month=month, day=day, hour=hour, minute=minute, second=second
+    )
 
 
 def file_name_to_datetime(path: str | os.PathLike) -> datetime:
@@ -97,9 +99,7 @@ def _date_prefix_to_date(name: str) -> date:
     """
     match = _DATE_PREFIX_PATTERN.match(name)
     if not match:
-        raise ValueError(
-            f"Name does not match expected format 'YYYYMMDD...': {name}"
-        )
+        raise ValueError(f"Name does not match expected format 'YYYYMMDD...': {name}")
     year, month, day = (int(g) for g in match.groups())
     return date(year=year, month=month, day=day)
 

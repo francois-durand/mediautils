@@ -203,7 +203,9 @@ def process_images(
         dest_dir = dest_portrait if orientation == "portrait" else dest_landscape
         clean_name = Path(file_path).name.replace(":", "_")
         try:
-            result = resize_image(file_path, max_dim=max_dim, out_dir=dest_dir, out_name=clean_name)
+            result = resize_image(
+                file_path, max_dim=max_dim, out_dir=dest_dir, out_name=clean_name
+            )
         except OSError:
             dest_dir_path = Path(dest_dir)
             dest_dir_path.mkdir(parents=True, exist_ok=True)

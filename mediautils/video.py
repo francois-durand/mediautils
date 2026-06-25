@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from shutil import copy2
 
+from moviepy import VideoFileClip
+
 
 def set_time_video(
     path: str | os.PathLike,
@@ -46,9 +48,15 @@ def set_time_video(
     tmp_path = out_path.with_stem(out_path.stem + "_tmp")
     subprocess.run(
         [
-            "ffmpeg", "-i", str(out_path),
-            "-metadata", f"creation_time={metadata_date}",
-            "-codec", "copy", "-y", str(tmp_path),
+            "ffmpeg",
+            "-i",
+            str(out_path),
+            "-metadata",
+            f"creation_time={metadata_date}",
+            "-codec",
+            "copy",
+            "-y",
+            str(tmp_path),
         ],
         check=True,
         capture_output=True,
@@ -82,8 +90,6 @@ def rotate_video(
     Path
         Path to the output file.
     """
-    from moviepy import VideoFileClip
-
     path = Path(path)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

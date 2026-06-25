@@ -1,6 +1,5 @@
-import math
 import os
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from pathlib import Path
 
 from mediautils.file_name import (

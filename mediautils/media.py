@@ -129,9 +129,11 @@ def process_standard_files(
     for path in sorted(in_dir.iterdir()):
         if not path.is_file():
             continue
+        print(path.name)
         dt = file_name_to_datetime(path)
         result = set_time(path, dt, out_dir=out_dir)
         results.append(result)
+    print("Done!")
     return results
 
 
@@ -169,12 +171,14 @@ def process_wa_files(
     results = []
     for d, paths in groups.items():
         for i, path in enumerate(paths):
+            print(path.name)
             t = _end_of_day_time(i, len(paths))
             dt = datetime.combine(d, t)
             out_name = f"{dt.strftime('%Y%m%d_%H%M%S')}_{path.name}"
             result = set_time(path, dt, out_dir=out_dir, out_name=out_name)
             results.append(result)
 
+    print("Done!")
     return results
 
 
@@ -211,10 +215,12 @@ def process_directory_files(
         d = _date_prefix_to_date(sub_dir.name)
         files = sorted(p for p in sub_dir.iterdir() if p.is_file())
         for i, path in enumerate(files):
+            print(path.name)
             t = _end_of_day_time(i, len(files))
             dt = datetime.combine(d, t)
             out_name = f"{dt.strftime('%Y%m%d_%H%M%S')}_{path.name}"
             result = set_time(path, dt, out_dir=out_dir, out_name=out_name)
             results.append(result)
 
+    print("Done!")
     return results

@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, time
 from pathlib import Path
+from shutil import copy2
 
 from mediautils.file_name import (
     _date_prefix_to_date,
@@ -11,7 +12,8 @@ from mediautils.image import set_time_image
 from mediautils.video import set_time_video
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg"}
-_VIDEO_EXTENSIONS = {".mp4"}
+_COPY_ONLY_EXTENSIONS = {".png"}
+_VIDEO_EXTENSIONS = {".mp4", ".mov"}
 
 
 def _end_of_day_time(index: int, count: int) -> time:
@@ -98,6 +100,14 @@ def set_time(
         return set_time_image(path, dt, out_dir=out_dir, out_name=out_name)
     if ext in _VIDEO_EXTENSIONS:
         return set_time_video(path, dt, out_dir=out_dir, out_name=out_name)
+    if ext in _COPY_ONLY_EXTENSIONS:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / (out_name or path.name)
+        copy2(path, out_path)
+        mod_time = dt.timestamp()
+        os.utime(out_path, (mod_time, mod_time))
+        return out_path
     raise ValueError(f"Unsupported file extension: {ext}")
 
 

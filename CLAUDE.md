@@ -57,3 +57,4 @@ GitHub Actions workflows in `.github/workflows/`:
 - Docstrings use **NumPy style** with Sphinx cross-references (`:class:`, `:meth:`, `:attr:`)
 - Python target version: 3.11+
 - Linter/formatter: Ruff
+- Every new public function or class must be re-exported in `mediautils/__init__.py` (pattern: `from mediautils.module import foo as foo`) to allow direct imports (`from mediautils import foo`).

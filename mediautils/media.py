@@ -191,6 +191,54 @@ def process_wa_files(
     return results
 
 
+def gather_yes_no(
+    in_dir: str | os.PathLike = "in",
+    out_dir: str | os.PathLike = "out",
+) -> list[Path]:
+    """Copy culled files from nested ``yes``/``no`` subdirectories to output buckets.
+
+    Recursively scans `in_dir` for files whose immediate parent directory is
+    named ``yes`` or ``no``, and copies them to ``out_dir/yes`` or
+    ``out_dir/no`` respectively. Files in any other directory (e.g. ``temp``)
+    are ignored.
+
+    Parameters
+    ----------
+    in_dir : str | os.PathLike
+        Root directory to scan recursively.
+    out_dir : str | os.PathLike
+        Output root. ``yes`` and ``no`` subdirectories are created as needed.
+
+    Returns
+    -------
+    list[Path]
+        Paths to the copied output files.
+    """
+    in_dir = Path(in_dir)
+    out_dir = Path(out_dir)
+    results = []
+    skipped = 0
+    for path in sorted(in_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        bucket = path.parent.name
+        if bucket not in {"yes", "no"}:
+            skipped += 1
+            continue
+        print(path.name)
+        dest_dir = out_dir / bucket
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / path.name
+        copy2(path, dest)
+        results.append(dest)
+    if skipped:
+        print(f"Warning: {skipped} file(s) ignored (not in a 'yes' or 'no' directory).")
+    else:
+        print("All files were in a 'yes' or 'no' directory.")
+    print("Done!")
+    return results
+
+
 def process_directory_files(
     in_dir: str | os.PathLike = "in",
     out_dir: str | os.PathLike = "out",

@@ -111,7 +111,7 @@ def set_time(
     raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def process_standard_files(
+def process_datetime_filenames(
     in_dir: str | os.PathLike = "in",
     out_dir: str | os.PathLike = "out",
 ) -> list[Path]:
@@ -146,7 +146,7 @@ def process_standard_files(
     return results
 
 
-def process_wa_files(
+def process_whatsapp_files(
     in_dir: str | os.PathLike = "in",
     out_dir: str | os.PathLike = "out",
 ) -> list[Path]:
@@ -239,7 +239,7 @@ def gather_yes_no(
     return results
 
 
-def process_directory_files(
+def process_date_subdirs(
     in_dir: str | os.PathLike = "in",
     out_dir: str | os.PathLike = "out",
 ) -> list[Path]:

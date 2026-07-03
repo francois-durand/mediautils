@@ -37,7 +37,7 @@ uv run sphinx-build docs docs/_build/html   # Build docs locally
 - `mediautils/file_name.py` — file name parsing (datetime/date extraction from standardized and WhatsApp names)
 - `mediautils/image.py` — image operations (EXIF metadata, orientation detection, resize, batch dispatch)
 - `mediautils/video.py` — video metadata manipulation (MP4 `creation_time` via ffmpeg)
-- `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_wa_files`, `process_directory_files`, `process_standard_files`)
+- `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_whatsapp_files`, `process_date_subdirs`, `process_datetime_filenames`, `gather_yes_no`)
 - `mediautils/cli.py` — Click-based CLI entry point (registered as `mediautils` console script)
 - `tests/` — pytest tests (also tests the CLI via `click.testing.CliRunner`)
 

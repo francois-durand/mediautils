@@ -11,9 +11,9 @@ from mediautils.image import resize_image as resize_image
 from mediautils.image import set_time_image as set_time_image
 from mediautils.video import rotate_video as rotate_video
 from mediautils.media import gather_yes_no as gather_yes_no
-from mediautils.media import process_directory_files as process_directory_files
-from mediautils.media import process_standard_files as process_standard_files
-from mediautils.media import process_wa_files as process_wa_files
+from mediautils.media import process_date_subdirs as process_date_subdirs
+from mediautils.media import process_datetime_filenames as process_datetime_filenames
+from mediautils.media import process_whatsapp_files as process_whatsapp_files
 from mediautils.media import set_time as set_time
 
 

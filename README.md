@@ -31,9 +31,9 @@ $ pip install mediautils
 Use Media Utils in a Python project:
 
 ```python
-from mediautils import process_standard_files
+from mediautils import process_datetime_filenames
 
-process_standard_files("in", "out")
+process_datetime_filenames("in", "out")
 ```
 
 ## Credits

@@ -31,6 +31,7 @@ uv run sphinx-build docs docs/_build/html   # Build docs locally
 ## System Dependencies
 
 - **ffmpeg** must be on `PATH` for video metadata operations (`set_time_video`).
+- **exiftool** must be on `PATH` for RAW image metadata operations (`set_time_raw`) — the `exif` package only parses JPEG APP1 segments, not TIFF-based RAW formats (e.g. Panasonic `.rw2`).
 
 ## Architecture
 

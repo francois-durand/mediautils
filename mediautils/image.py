@@ -1,5 +1,7 @@
 import os
 import shutil
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -21,11 +23,97 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
 ]
 
 
+def get_time_image(path: str | os.PathLike) -> datetime:
+    """Read the ``datetime_original`` EXIF tag of an image.
+
+    Parameters
+    ----------
+    path : str | os.PathLike
+        Path to the image.
+
+    Returns
+    -------
+    datetime
+        The datetime stored in the ``datetime_original`` EXIF tag, naive
+        (no timezone attached, regardless of whether an ``offset_time_original``
+        tag is present).
+    """
+    image = ExifImage(path)
+    return datetime.strptime(image.datetime_original, DATETIME_STR_FORMAT)
+
+
+def get_offset_image(path: str | os.PathLike) -> str | None:
+    """Read the ``offset_time_original`` EXIF tag of an image.
+
+    Parameters
+    ----------
+    path : str | os.PathLike
+        Path to the image.
+
+    Returns
+    -------
+    str | None
+        The UTC offset stored in the ``offset_time_original`` EXIF tag
+        (e.g. ``"+09:00"``), or ``None`` if the tag is absent.
+    """
+    image = ExifImage(path)
+    return getattr(image, "offset_time_original", None)
+
+
+def set_file_creation_time(path: str | os.PathLike, dt: datetime) -> None:
+    """Set a file's Windows filesystem creation-time metadata.
+
+    Unlike EXIF timestamps, Windows filesystem timestamps carry no timezone:
+    they are stored as an absolute instant and redisplayed converted to
+    whatever timezone the machine currently uses. `dt` is interpreted as
+    local wall-clock time on the current machine (exactly like
+    :meth:`datetime.timestamp`), so that a tool reading the creation time
+    back on this same machine (e.g. Windows Explorer or FastStone Image
+    Viewer) redisplays the same digits.
+
+    Parameters
+    ----------
+    path : str | os.PathLike
+        Path to the file.
+    dt : datetime
+        The datetime to set as creation time, interpreted in the machine's
+        current local timezone.
+
+    Raises
+    ------
+    NotImplementedError
+        If not running on Windows.
+    """
+    if sys.platform != "win32":
+        raise NotImplementedError(
+            "Setting file creation time is only supported on Windows."
+        )
+
+    import pywintypes
+    import win32con
+    import win32file
+
+    handle = win32file.CreateFile(
+        str(path),
+        win32con.GENERIC_WRITE,
+        win32con.FILE_SHARE_WRITE,
+        None,
+        win32con.OPEN_EXISTING,
+        0,
+        None,
+    )
+    try:
+        win32file.SetFileTime(handle, pywintypes.Time(dt), None, None)
+    finally:
+        handle.Close()
+
+
 def set_time_image(
     path: str | os.PathLike,
     dt: datetime,
     out_dir: str | os.PathLike = "out",
     out_name: str | None = None,
+    offset: str | None = None,
 ) -> Path:
     """Write a copy of an image with ``datetime_original`` set to `dt`.
 
@@ -39,6 +127,10 @@ def set_time_image(
         Directory where the modified copy is saved. Created if it does not exist.
     out_name : str | None
         Output file name. If ``None``, the original file name is kept.
+    offset : str | None
+        UTC offset to write to the ``offset_time_original`` EXIF tag, in
+        ``"+HH:MM"``/``"-HH:MM"`` format (e.g. ``"+09:00"``). If ``None``,
+        the tag is left untouched.
 
     Returns
     -------
@@ -50,9 +142,63 @@ def set_time_image(
     out_dir.mkdir(parents=True, exist_ok=True)
     image = ExifImage(path)
     image.datetime_original = dt.strftime(DATETIME_STR_FORMAT)
+    if offset is not None:
+        image.offset_time_original = offset
     out_path = out_dir / (out_name or path.name)
     with open(out_path, "wb") as f:
         f.write(image.get_file())
+    return out_path
+
+
+def set_time_raw(
+    path: str | os.PathLike,
+    dt: datetime,
+    out_dir: str | os.PathLike = "out",
+    out_name: str | None = None,
+    offset: str | None = None,
+) -> Path:
+    """Write a copy of a RAW image with ``DateTimeOriginal`` set to `dt`.
+
+    Camera RAW formats (e.g. Panasonic ``.rw2``) are TIFF-based, not
+    JPEG-APP1-based, so the :class:`exif.Image` interface used by
+    :func:`set_time_image` cannot parse them. This uses the external
+    `exiftool <https://exiftool.org/>`_ command-line tool instead, which
+    must be on `PATH`. Any other metadata tag is left untouched.
+
+    Parameters
+    ----------
+    path : str | os.PathLike
+        Path to the source RAW image.
+    dt : datetime
+        The datetime to write into the ``DateTimeOriginal`` metadata tag.
+    out_dir : str | os.PathLike
+        Directory where the modified copy is saved. Created if it does not exist.
+    out_name : str | None
+        Output file name. If ``None``, the original file name is kept.
+    offset : str | None
+        UTC offset to write to the ``OffsetTimeOriginal`` metadata tag, in
+        ``"+HH:MM"``/``"-HH:MM"`` format (e.g. ``"+09:00"``). If ``None``,
+        the tag is left untouched.
+
+    Returns
+    -------
+    Path
+        Path to the output file.
+    """
+    path = Path(path)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / (out_name or path.name)
+    shutil.copy2(path, out_path)
+    args = [
+        "exiftool",
+        "-overwrite_original",
+        f"-DateTimeOriginal={dt.strftime('%Y:%m:%d %H:%M:%S')}",
+    ]
+    if offset is not None:
+        args.append(f"-OffsetTimeOriginal={offset}")
+    args.append(str(out_path))
+    subprocess.run(args, check=True, capture_output=True)
     return out_path
 
 

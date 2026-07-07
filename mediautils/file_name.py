@@ -72,6 +72,78 @@ def file_name_to_datetime(path: str | os.PathLike) -> datetime:
     return _file_name_to_datetime(Path(path).stem)
 
 
+def _replace_datetime_prefix(name: str, dt: datetime) -> str:
+    """Replace the ``YYYYMMDD_HHMMSS`` prefix of a file name string with `dt`.
+
+    Parameters
+    ----------
+    name : str
+        A file name starting with ``YYYYMMDD_HHMMSS``.
+    dt : datetime
+        The datetime to encode as the new prefix.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ValueError
+        If `name` does not match the expected format.
+
+    Examples
+    --------
+        >>> _replace_datetime_prefix(
+        ...     "20240131_181253_blabla", datetime(2024, 1, 31, 18, 27, 53)
+        ... )
+        '20240131_182753_blabla'
+
+        >>> _replace_datetime_prefix("20240131_181253.jpg", datetime(2024, 1, 31, 18, 12, 38))
+        '20240131_181238.jpg'
+    """
+    match = _PATTERN.match(name)
+    if not match:
+        raise ValueError(
+            f"File name does not match expected format 'YYYYMMDD_HHMMSS...': {name}"
+        )
+    return dt.strftime("%Y%m%d_%H%M%S") + name[match.end() :]
+
+
+def replace_datetime_prefix(path: str | os.PathLike, dt: datetime) -> str:
+    """Replace the ``YYYYMMDD_HHMMSS`` prefix of a file's name with `dt`.
+
+    Parameters
+    ----------
+    path : str | os.PathLike
+        Path to a file whose name starts with ``YYYYMMDD_HHMMSS``.
+    dt : datetime
+        The datetime to encode as the new prefix.
+
+    Returns
+    -------
+    str
+        The corrected file name (not a path).
+
+    Raises
+    ------
+    ValueError
+        If the file name does not match the expected format.
+
+    Examples
+    --------
+        >>> replace_datetime_prefix(
+        ...     "20240131_181253_blabla.jpg", datetime(2024, 1, 31, 18, 27, 53)
+        ... )
+        '20240131_182753_blabla.jpg'
+
+        >>> replace_datetime_prefix(
+        ...     "some/dir/20250101_120000.png", datetime(2025, 1, 1, 11, 45, 0)
+        ... )
+        '20250101_114500.png'
+    """
+    return _replace_datetime_prefix(Path(path).name, dt)
+
+
 def _date_prefix_to_date(name: str) -> date:
     """Extract a date from a string starting with ``YYYYMMDD``.
 

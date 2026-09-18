@@ -5,11 +5,13 @@ from importlib.metadata import metadata
 from mediautils.file_name import file_name_to_datetime as file_name_to_datetime
 from mediautils.file_name import replace_datetime_prefix as replace_datetime_prefix
 from mediautils.file_name import wa_file_name_to_date as wa_file_name_to_date
-from mediautils.image import get_all_jpeg_files as get_all_jpeg_files
+from mediautils.image import (
+    dispatch_images_by_orientation as dispatch_images_by_orientation,
+)
+from mediautils.image import get_all_image_files as get_all_image_files
 from mediautils.image import get_offset_image as get_offset_image
 from mediautils.image import get_orientation as get_orientation
 from mediautils.image import get_time_image as get_time_image
-from mediautils.image import process_images as process_images
 from mediautils.image import resize_image as resize_image
 from mediautils.image import set_file_creation_time as set_file_creation_time
 from mediautils.image import set_time_image as set_time_image

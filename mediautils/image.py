@@ -202,11 +202,11 @@ def set_time_raw(
     return out_path
 
 
-def get_all_jpeg_files(
+def get_all_image_files(
     root_dir: str | os.PathLike,
     exclude: list[str] | None = None,
 ) -> list[Path]:
-    """List all JPEG files under `root_dir` recursively.
+    """List all JPEG and PNG files under `root_dir` recursively.
 
     Parameters
     ----------
@@ -224,14 +224,14 @@ def get_all_jpeg_files(
     if exclude is None:
         exclude = DEFAULT_EXCLUDE_PATTERNS
     root_dir = Path(root_dir)
-    jpeg_files: list[Path] = []
+    image_files: list[Path] = []
     for dirpath, _, filenames in os.walk(root_dir):
         if any(pattern in dirpath for pattern in exclude):
             continue
         for name in filenames:
-            if name.lower().endswith((".jpg", ".jpeg")):
-                jpeg_files.append(Path(dirpath) / name)
-    return jpeg_files
+            if name.lower().endswith((".jpg", ".jpeg", ".png")):
+                image_files.append(Path(dirpath) / name)
+    return image_files
 
 
 def get_orientation(path: str | os.PathLike) -> str:
@@ -243,7 +243,7 @@ def get_orientation(path: str | os.PathLike) -> str:
     Parameters
     ----------
     path : str | os.PathLike
-        Path to a JPEG image.
+        Path to a JPEG or PNG image.
 
     Returns
     -------
@@ -310,23 +310,24 @@ def resize_image(
     return out_path
 
 
-def process_images(
-    src_dir: str | os.PathLike,
-    dest_portrait: str | os.PathLike,
-    dest_landscape: str | os.PathLike,
+def dispatch_images_by_orientation(
+    src_dir: str | os.PathLike = "in",
+    dest_portrait: str | os.PathLike = "out/v",
+    dest_landscape: str | os.PathLike = "out/h",
     max_dim: int = 1024,
     exclude: list[str] | None = None,
 ) -> list[Path]:
-    """Dispatch JPEG images by orientation and resize them.
+    """Dispatch JPEG and PNG images by orientation and resize them.
 
-    Collects all JPEG files under `src_dir` (recursively), detects each
-    image's orientation, copies it to `dest_portrait` or `dest_landscape`,
-    and resizes it if its largest dimension exceeds `max_dim`.
+    Collects all JPEG and PNG files under `src_dir` (recursively), detects
+    each image's orientation, copies it to `dest_portrait` or
+    `dest_landscape`, and resizes it if its largest dimension exceeds
+    `max_dim`.
 
     Parameters
     ----------
     src_dir : str | os.PathLike
-        Source directory to scan for JPEG files.
+        Source directory to scan for image files.
     dest_portrait : str | os.PathLike
         Output directory for portrait images.
     dest_landscape : str | os.PathLike
@@ -334,17 +335,20 @@ def process_images(
     max_dim : int
         Maximum size in pixels for the largest dimension.
     exclude : list[str] | None
-        Exclusion patterns passed to :func:`get_all_jpeg_files`.
+        Exclusion patterns passed to :func:`get_all_image_files`.
 
     Returns
     -------
     list[Path]
         Paths to the output files.
     """
-    jpeg_files = get_all_jpeg_files(src_dir, exclude=exclude)
+    image_files = get_all_image_files(src_dir, exclude=exclude)
     results: list[Path] = []
 
-    for file_path in jpeg_files:
+    Path(dest_portrait).mkdir(parents=True, exist_ok=True)
+    Path(dest_landscape).mkdir(parents=True, exist_ok=True)
+
+    for file_path in image_files:
         orientation = get_orientation(file_path)
         dest_dir = dest_portrait if orientation == "portrait" else dest_landscape
         clean_name = Path(file_path).name.replace(":", "_")

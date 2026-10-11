@@ -8,6 +8,7 @@ from mediautils.file_name import (
     _date_prefix_to_date,
     file_name_to_datetime,
     replace_datetime_prefix,
+    standardize_name,
     wa_file_name_to_date,
 )
 from mediautils.image import (
@@ -17,7 +18,7 @@ from mediautils.image import (
     set_time_image,
     set_time_raw,
 )
-from mediautils.video import set_time_video
+from mediautils.video import set_all_dates_video, set_time_video
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg"}
 _RAW_EXTENSIONS = {".rw2"}
@@ -155,6 +156,67 @@ def process_datetime_filenames(
         result = set_time(path, dt, out_dir=out_dir)
         results.append(result)
     print("Done!")
+    return results
+
+
+def process_videos(
+    in_dir: str | os.PathLike = "in",
+    out_dir: str | os.PathLike = "out",
+    tz: str = "Europe/Paris",
+) -> list[Path]:
+    """Standardize the names of videos and set all their dates accordingly.
+
+    Each video of `in_dir` is copied to `out_dir` under its standardized name
+    (see :func:`~mediautils.file_name.standardize_name`), with every date it
+    carries set to the datetime of that name (see
+    :func:`~mediautils.video.set_all_dates_video`).
+
+    Files that cannot be processed (unknown naming convention, extension that
+    is not a video, name already taken in `out_dir`) are left untouched and
+    listed at the end.
+
+    Parameters
+    ----------
+    in_dir : str | os.PathLike
+        Directory containing the videos.
+    out_dir : str | os.PathLike
+        Directory where processed videos are saved.
+    tz : str
+        IANA timezone in which the datetimes of the file names are expressed.
+
+    Returns
+    -------
+    list[Path]
+        Paths to the output files.
+    """
+    in_dir = Path(in_dir)
+    out_dir = Path(out_dir)
+    results = []
+    problems = []
+    for path in sorted(in_dir.iterdir()):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in _VIDEO_EXTENSIONS:
+            problems.append(f"{path.name}: not a video extension")
+            continue
+        try:
+            name, dt = standardize_name(path)
+        except ValueError:
+            problems.append(f"{path.name}: unknown file name convention")
+            continue
+        if (out_dir / name).exists():
+            problems.append(f"{path.name}: {name} already exists in {out_dir}")
+            continue
+        print(f"{path.name} -> {name}")
+        results.append(
+            set_all_dates_video(path, dt, out_dir=out_dir, out_name=name, tz=tz)
+        )
+    if problems:
+        print()
+        print(f"!!! {len(problems)} file(s) NOT processed (left in {in_dir}):")
+        for problem in problems:
+            print(f"!!!   {problem}")
+    print(f"Done! {len(results)} video(s) processed.")
     return results
 
 

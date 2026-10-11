@@ -1,8 +1,67 @@
 """Tests for `mediautils` package."""
 
+import shutil
+import subprocess
+from datetime import datetime
+
+import pytest
 from click.testing import CliRunner
 
-from mediautils import cli
+from mediautils import cli, process_videos
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("exiftool") is None,
+    reason="needs ffmpeg and exiftool",
+)
+def test_process_videos(tmp_path, capsys):
+    """Rename an Android video, set all its dates, and complain about the rest."""
+    in_dir, out_dir = tmp_path / "in", tmp_path / "out"
+    in_dir.mkdir()
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=black:s=64x64:d=1",
+            "-metadata",
+            "creation_time=2001-01-01T00:00:00Z",
+            str(in_dir / "VID_20190924_162534168.mp4"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    shutil.copy(in_dir / "VID_20190924_162534168.mp4", in_dir / "MVI_1234.mp4")
+    (in_dir / "notes.txt").write_text("not a video")
+
+    results = process_videos(in_dir, out_dir)
+
+    expected = out_dir / "20190924_162534_VID_20190924_162534168.mp4"
+    assert results == [expected]
+    assert sorted(p.name for p in out_dir.iterdir()) == [expected.name]
+    stored = subprocess.run(
+        [
+            "exiftool",
+            "-s3",
+            "-api",
+            "QuickTimeUTC=0",
+            "-QuickTime:CreateDate",
+            "-Track1:MediaCreateDate",
+            str(expected),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    # 16:25:34 in Paris during daylight saving time is 14:25:34 UTC.
+    assert stored == ["2019:09:24", "14:25:34", "2019:09:24", "14:25:34"]
+    assert datetime.fromtimestamp(expected.stat().st_mtime) == datetime(
+        2019, 9, 24, 16, 25, 34
+    )
+    output = capsys.readouterr().out
+    assert "MVI_1234.mp4: unknown file name convention" in output
+    assert "notes.txt: not a video extension" in output
 
 
 def test_command_line_interface():

@@ -166,10 +166,11 @@ def process_videos(
 ) -> list[Path]:
     """Standardize the names of videos and set all their dates accordingly.
 
-    Each video of `in_dir` is copied to `out_dir` under its standardized name
-    (see :func:`~mediautils.file_name.standardize_name`), with every date it
-    carries set to the datetime of that name (see
-    :func:`~mediautils.video.set_all_dates_video`).
+    Each video of `in_dir`, subdirectories included, is copied to `out_dir`
+    under its standardized name (see
+    :func:`~mediautils.file_name.standardize_name`), in the same relative
+    subdirectory, with every date it carries set to the datetime of that name
+    (see :func:`~mediautils.video.set_all_dates_video`).
 
     Files that cannot be processed (unknown naming convention, extension that
     is not a video, name already taken in `out_dir`) are left untouched and
@@ -178,7 +179,7 @@ def process_videos(
     Parameters
     ----------
     in_dir : str | os.PathLike
-        Directory containing the videos.
+        Directory containing the videos, possibly in subdirectories.
     out_dir : str | os.PathLike
         Directory where processed videos are saved.
     tz : str
@@ -193,23 +194,25 @@ def process_videos(
     out_dir = Path(out_dir)
     results = []
     problems = []
-    for path in sorted(in_dir.iterdir()):
+    for path in sorted(in_dir.rglob("*")):
         if not path.is_file():
             continue
+        rel = path.relative_to(in_dir)
         if path.suffix.lower() not in _VIDEO_EXTENSIONS:
-            problems.append(f"{path.name}: not a video extension")
+            problems.append(f"{rel}: not a video extension")
             continue
         try:
             name, dt = standardize_name(path)
         except ValueError:
-            problems.append(f"{path.name}: unknown file name convention")
+            problems.append(f"{rel}: unknown file name convention")
             continue
-        if (out_dir / name).exists():
-            problems.append(f"{path.name}: {name} already exists in {out_dir}")
+        target_dir = out_dir / rel.parent
+        if (target_dir / name).exists():
+            problems.append(f"{rel}: {name} already exists in {target_dir}")
             continue
-        print(f"{path.name} -> {name}")
+        print(f"{rel} -> {name}")
         results.append(
-            set_all_dates_video(path, dt, out_dir=out_dir, out_name=name, tz=tz)
+            set_all_dates_video(path, dt, out_dir=target_dir, out_name=name, tz=tz)
         )
     if problems:
         print()

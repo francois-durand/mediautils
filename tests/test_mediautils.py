@@ -33,13 +33,23 @@ def test_process_videos(tmp_path, capsys):
         capture_output=True,
     )
     shutil.copy(in_dir / "VID_20190924_162534168.mp4", in_dir / "MVI_1234.mp4")
+    (in_dir / "Série").mkdir()
+    shutil.copy(
+        in_dir / "VID_20190924_162534168.mp4", in_dir / "Série" / "20190103_184939.mp4"
+    )
     (in_dir / "notes.txt").write_text("not a video")
 
     results = process_videos(in_dir, out_dir)
 
     expected = out_dir / "20190924_162534_VID_20190924_162534168.mp4"
-    assert results == [expected]
-    assert sorted(p.name for p in out_dir.iterdir()) == [expected.name]
+    in_subdir = out_dir / "Série" / "20190103_184939.mp4"
+    assert sorted(results) == sorted([expected, in_subdir])
+    assert sorted(
+        p.relative_to(out_dir).as_posix() for p in out_dir.rglob("*.mp4")
+    ) == [
+        "20190924_162534_VID_20190924_162534168.mp4",
+        "Série/20190103_184939.mp4",
+    ]
     stored = subprocess.run(
         [
             "exiftool",
@@ -58,6 +68,9 @@ def test_process_videos(tmp_path, capsys):
     assert stored == ["2019:09:24", "14:25:34", "2019:09:24", "14:25:34"]
     assert datetime.fromtimestamp(expected.stat().st_mtime) == datetime(
         2019, 9, 24, 16, 25, 34
+    )
+    assert datetime.fromtimestamp(in_subdir.stat().st_mtime) == datetime(
+        2019, 1, 3, 18, 49, 39
     )
     output = capsys.readouterr().out
     assert "MVI_1234.mp4: unknown file name convention" in output

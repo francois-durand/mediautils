@@ -302,17 +302,44 @@ def _patch_locked_dates(path: Path, tags: dict[str, str], delta: timedelta) -> N
             f.write(content)
 
 
+def _holds(value: str, dt: datetime, aware: datetime) -> bool:
+    """Whether an exiftool date already denotes `dt` (to the second).
+
+    Examples
+    --------
+        >>> dt = datetime(2025, 4, 5, 20, 55, 22)
+        >>> aware = dt.replace(tzinfo=ZoneInfo("Europe/Paris"))
+        >>> _holds("2025:04:05 20:55:22.668+02:00", dt, aware)
+        True
+        >>> _holds("0000:00:00 00:00:00", dt, aware)
+        False
+    """
+    try:
+        parsed = _parse_exiftool_date(value)
+    except ValueError:  # e.g. the zero dates of WhatsApp videos
+        return False
+    return parsed == (aware if parsed.tzinfo else dt)
+
+
 def _set_all_dates_video(
-    path: Path, dt: datetime, out_path: Path, tz: str, locked_shift: timedelta
+    path: Path,
+    dt: datetime,
+    out_path: Path,
+    tz: str,
+    locked_shift: timedelta,
+    copy: bool = True,
 ) -> dict[str, str]:
     """Do the work of :func:`set_all_dates_video`.
+
+    With ``copy=False``, `out_path` is modified in place (`path` is ignored).
 
     Returns
     -------
     dict[str, str]
         The date tags exiftool cannot write, with their final values.
     """
-    copy2(path, out_path)
+    if copy:
+        copy2(path, out_path)
     aware = dt.replace(tzinfo=ZoneInfo(tz))
     value = aware.isoformat(sep=" ").replace("-", ":", 2)  # 2019:09:24 16:40:38+02:00
     before = _read_date_tags(out_path)
@@ -332,10 +359,13 @@ def _set_all_dates_video(
     }
     if lists:
         raise RuntimeError(f"lists of dates not handled: {lists}")
-    if before:
+    # Tags already holding `dt` are left alone, which keeps any fraction of a
+    # second they carry (see :func:`write_precise_start`).
+    to_write = [name for name, read in before.items() if not _holds(read, dt, aware)]
+    if to_write:
         subprocess.run(
             ["exiftool", "-overwrite_original", "-api", "QuickTimeUTC=1"]
-            + [f"-{name}={value}" for name in before]
+            + [f"-{name}={value}" for name in to_write]
             + [str(out_path)],
             check=True,
             capture_output=True,
@@ -445,6 +475,112 @@ def set_all_dates_video(
         out_path.unlink(missing_ok=True)
         raise RuntimeError(f"{path.name}: {error}") from error
     return out_path, unwritable
+
+
+def _timecode(time_of_day: float, frame_rate: float) -> tuple[str, str] | None:
+    """Time-of-day timecode at `frame_rate`, in the XMP (xmpDM) conventions.
+
+    29.97 and 59.94 fps use drop-frame timecode, which stays aligned with the
+    wall clock. Returns ``None`` for other non-integer rates.
+
+    Examples
+    --------
+        >>> _timecode(20 * 3600 + 55 * 60 + 22.668, 25)
+        ('25Timecode', '20:55:22:17')
+
+        Drop-frame labels drift ahead of the wall clock by about 3.6 ms per
+        hour (here 75 ms, 4.5 frames), but they convert back exactly to the
+        frame count, hence to the time:
+
+        >>> _timecode(20 * 3600 + 55 * 60 + 22.668, 60000 / 1001)
+        ('5994DropTimecode', '20:55:22;45')
+
+        Frame 1800 at 29.97 fps is the first of minute 1, whose labels ;00 and
+        ;01 are dropped:
+
+        >>> _timecode(1799 * 1.001 / 30, 30000 / 1001), _timecode(1800 * 1.001 / 30, 30000 / 1001)
+        (('2997DropTimecode', '00:00:59;29'), ('2997DropTimecode', '00:01:00;02'))
+
+        >>> _timecode(3600.0, 33.2) is None
+        True
+    """
+    nominal = round(frame_rate)
+    if abs(frame_rate - nominal) < 1e-6:
+        frames = round(time_of_day * nominal)
+        seconds, ff = divmod(frames, nominal)
+        h, rest = divmod(seconds, 3600)
+        m, s = divmod(rest, 60)
+        return f"{nominal}Timecode", f"{h:02d}:{m:02d}:{s:02d}:{ff:02d}"
+    if nominal in (30, 60) and abs(frame_rate - nominal * 1000 / 1001) < 1e-3:
+        # Drop-frame: labels 0 and 1 (2 and 3 at 59.94) are skipped every
+        # minute, except every tenth minute.
+        drop = 2 * nominal // 30
+        frames = round(time_of_day * frame_rate)
+        per_10min = 10 * 60 * nominal - 9 * drop
+        per_min = 60 * nominal - drop
+        tens, rest = divmod(frames, per_10min)
+        frames += 9 * drop * tens
+        if rest > drop:
+            frames += drop * ((rest - drop) // per_min)
+        ff = frames % nominal
+        s = frames // nominal % 60
+        m = frames // (nominal * 60) % 60
+        h = frames // (nominal * 3600)
+        time_format = "2997DropTimecode" if nominal == 30 else "5994DropTimecode"
+        return time_format, f"{h:02d}:{m:02d}:{s:02d};{ff:02d}"
+    return None
+
+
+def write_precise_start(
+    path: str | os.PathLike,
+    start: datetime,
+    frame_rate: float | None = None,
+    tz: str = "Europe/Paris",
+    precise: bool = True,
+) -> None:
+    """Record, in place, the start of a video more precisely than to the second.
+
+    Writes in the XMP metadata of the file (``xmpDM:shotDate``) the start of
+    the recording to the millisecond and, if `frame_rate` is given and
+    supported, a time-of-day start timecode to the frame
+    (``xmpDM:startTimecode``), which editing software can use to synchronize
+    several cameras. Nothing else in the file changes (no remuxing). The name
+    and the other dates of the file, which stay to the second, are left alone.
+
+    Parameters
+    ----------
+    path : str | os.PathLike
+        Path to the video, modified in place.
+    start : datetime
+        Start of the recording, naive, as local wall-clock time in `tz`.
+    frame_rate : float | None
+        Frame rate of the video, for the timecode (none if ``None``).
+    tz : str
+        IANA timezone in which `start` is expressed.
+    precise : bool
+        If ``False`` (start only known to about a second), the date is written
+        to the second and no timecode is written.
+    """
+    aware = start.replace(tzinfo=ZoneInfo(tz))
+    stamp = aware.strftime("%Y:%m:%d %H:%M:%S")
+    if precise:
+        stamp += f".{start.microsecond // 1000:03d}"
+    offset = aware.strftime("%z")
+    args = [f"-XMP-xmpDM:ShotDate={stamp}{offset[:3]}:{offset[3:]}"]
+    if precise and frame_rate:
+        midnight = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        tc = _timecode((start - midnight).total_seconds(), frame_rate)
+        if tc:
+            args += [
+                # "#=": raw XMP value, not exiftool's printed one ("25 fps").
+                f"-XMP-xmpDM:StartTimecodeTimeFormat#={tc[0]}",
+                f"-XMP-xmpDM:StartTimecodeTimeValue={tc[1]}",
+            ]
+    subprocess.run(
+        ["exiftool", "-overwrite_original", *args, str(path)],
+        check=True,
+        capture_output=True,
+    )
 
 
 def rotate_video(

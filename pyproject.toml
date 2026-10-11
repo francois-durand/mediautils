@@ -19,6 +19,7 @@ dependencies = [
     "click>=8.1.8",
     "exif>=1.6.0",
     "moviepy>=2.0.0",
+    "numpy>=1.26",
     "Pillow>=11.0.0",
     "pywin32>=306 ; sys_platform == 'win32'",
     "tzdata>=2025.2",

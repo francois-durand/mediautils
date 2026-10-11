@@ -2,6 +2,13 @@
 
 from importlib.metadata import metadata
 
+from mediautils.audiosync import audio_offset as audio_offset
+from mediautils.audiosync import read_audio as read_audio
+from mediautils.audiosync import sync_videos as sync_videos
+from mediautils.audiosync import SyncResult as SyncResult
+from mediautils.shotcut import project_files as project_files
+from mediautils.shotcut import relink_project as relink_project
+
 from mediautils.file_name import file_name_to_datetime as file_name_to_datetime
 from mediautils.file_name import replace_datetime_prefix as replace_datetime_prefix
 from mediautils.file_name import standardize_name as standardize_name
@@ -19,6 +26,7 @@ from mediautils.image import set_time_image as set_time_image
 from mediautils.image import set_time_raw as set_time_raw
 from mediautils.video import rotate_video as rotate_video
 from mediautils.video import set_all_dates_video as set_all_dates_video
+from mediautils.video import write_precise_start as write_precise_start
 from mediautils.media import gather_yes_no as gather_yes_no
 from mediautils.media import process_camera_timezone as process_camera_timezone
 from mediautils.media import process_clock_shift as process_clock_shift

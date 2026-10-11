@@ -159,6 +159,74 @@ def test_patch_locked_dates(tmp_path):
     assert path.read_bytes() == before
 
 
+def test_relink_project(tmp_path):
+    """Links become bare names of files next to the project; nothing else changes."""
+    from mediautils import project_files, relink_project
+
+    (tmp_path / "20250405_205522_P1045670.MP4").write_bytes(b"")
+    (tmp_path / "20250405_205454_MVI_0935_from_Andrea.MOV").write_bytes(b"")
+    old_andrea = "20250405_231748_MVI_0935_from_Andrea.MOV"
+    project = tmp_path / "p.mlt"
+    original = (
+        '<mlt>\n<chain id="chain0" out="00:04:07.200">\n'
+        '<property name="resource">20250405_205522_P1045670.MP4</property>\n'
+        '<property name="shotcut:caption">20250405_205522_P1045670.MP4</property>\n'
+        "</chain>\n"
+        '<chain id="chain1">\n'
+        f'<property name="resource">c:/Dropbox/A/old place/01 Cocaine/{old_andrea}</property>\n'
+        f'<property name="shotcut:caption">{old_andrea}</property>\n'
+        "</chain>\n"
+        '<property name="resource">c:/Dropbox/B/music.mp3</property>\n'
+        '<entry producer="chain1" in="00:00:01.101" out="00:03:46.530"/>\n</mlt>\n'
+    )
+    project.write_bytes(original.encode("utf-8"))
+
+    changes = relink_project(
+        project, renames={old_andrea: "20250405_205454_MVI_0935_from_Andrea.MOV"}
+    )
+
+    assert len(changes) == 2  # Andrea's resource and caption
+    assert project_files(project) == [
+        "20250405_205522_P1045670.MP4",
+        "20250405_205454_MVI_0935_from_Andrea.MOV",
+        "c:/Dropbox/B/music.mp3",  # not next to the project: left as is
+    ]
+    assert 'in="00:00:01.101" out="00:03:46.530"' in project.read_text("utf-8")
+    assert (tmp_path / "p.mlt.bak").read_text("utf-8") == original
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("exiftool") is None,
+    reason="needs ffmpeg and exiftool",
+)
+def test_write_precise_start(tmp_path):
+    """The start is recorded in XMP to the millisecond, with a timecode."""
+    from mediautils import write_precise_start
+
+    path = tmp_path / "v.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "color=black:s=64x64:d=1:r=25", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    write_precise_start(path, datetime(2025, 4, 5, 20, 55, 22, 668000), frame_rate=25)
+    out = subprocess.run(
+        [
+            "exiftool",
+            "-s3",
+            "-n",
+            "-XMP-xmpDM:ShotDate",
+            "-XMP-xmpDM:StartTimecodeTimeFormat",
+            "-XMP-xmpDM:StartTimecodeTimeValue",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split("\n")
+    assert out[:3] == ["2025:04:05 20:55:22.668+02:00", "25Timecode", "20:55:22:17"]
+
+
 def test_command_line_interface():
     """Test the CLI."""
     runner = CliRunner()

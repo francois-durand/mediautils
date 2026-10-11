@@ -78,6 +78,51 @@ def test_process_videos(tmp_path, capsys):
     assert "notes.txt: not a video extension" in output
 
 
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("exiftool") is None,
+    reason="needs ffmpeg and exiftool",
+)
+def test_date_lists(tmp_path, capsys):
+    """The Adobe save history is kept as is; any other list of dates is refused."""
+    in_dir, out_dir = tmp_path / "in", tmp_path / "out"
+    in_dir.mkdir()
+    base = in_dir / "base.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "color=black:s=64x64:d=1", str(base)],
+        check=True,
+        capture_output=True,
+    )
+    history = in_dir / "20260208_235001_history.mp4"
+    other = in_dir / "20260208_235002_other.mp4"
+    for path, tag in ((history, "HistoryWhen"), (other, "VersionsModifyDate")):
+        shutil.copy(base, path)
+        subprocess.run(
+            [
+                "exiftool",
+                "-overwrite_original",
+                f"-XMP-xmpMM:{tag}+=2026:02:16 13:10:27",
+                f"-XMP-xmpMM:{tag}+=2026:02:16 13:10:44",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    base.unlink()
+
+    results = process_videos(in_dir, out_dir)
+
+    assert [p.name for p in results] == [history.name]
+    kept = subprocess.run(
+        ["exiftool", "-s3", "-XMP-xmpMM:HistoryWhen", str(results[0])],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "2026:02:16 13:10:27" in kept and "2026:02:16 13:10:44" in kept
+    assert "lists of dates not handled" in capsys.readouterr().out
+    assert not (out_dir / other.name).exists()
+
+
 def _atom(kind: bytes, payload: bytes) -> bytes:
     return struct.pack(">I", 8 + len(payload)) + kind + payload
 

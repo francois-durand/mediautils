@@ -26,6 +26,10 @@ _UNWRITABLE_TOLERANCE = timedelta(seconds=1)
 # Tags of the XMP "Pantry" of Adobe exports (Premiere...), which holds a copy of
 # the metadata of the source files of a montage; removed as a whole.
 _PANTRY_PREFIX = "XMP-xmpMM:Pantry"
+# Lists of dates kept as they are, as an explicit exception to "every date of
+# the file is the date of its name": the save history of Adobe software gives
+# the true dates of the editing work, and nothing uses it to date the video.
+_KEPT_DATE_LISTS = {"XMP-xmpMM:HistoryWhen"}
 
 
 def set_time_video(
@@ -100,8 +104,35 @@ def _read_date_tags(path: Path) -> dict[str, str]:
     dict[str, str]
         Maps ``Group:Tag`` names (exiftool family-1 groups, e.g.
         ``Track1:MediaCreateDate``) to their values, QuickTime UTC dates being
-        converted to local time with an explicit offset.
+        converted to local time with an explicit offset. Only single dates:
+        see :func:`_read_date_list_tags` for lists of dates.
     """
+    return {
+        name: value
+        for name, value in _read_time_tags(path).items()
+        if isinstance(value, str)
+        and _EXIFTOOL_DATE.match(value)
+        and name not in _KEPT_DATE_LISTS  # a history with a single entry
+    }
+
+
+def _read_date_list_tags(path: Path) -> dict[str, list]:
+    """Read the embedded tags of a file holding lists of dates.
+
+    Such tags are typically fields of lists of structures, e.g.
+    ``XMP-xmpMM:HistoryWhen`` (the save history of Adobe software).
+    """
+    return {
+        name: value
+        for name, value in _read_time_tags(path).items()
+        if isinstance(value, list)
+        and value
+        and all(isinstance(v, str) and _EXIFTOOL_DATE.match(v) for v in value)
+    }
+
+
+def _read_time_tags(path: Path) -> dict:
+    """Read the embedded tags of the exiftool "time" group of a file."""
     result = subprocess.run(
         [
             "exiftool",
@@ -120,10 +151,7 @@ def _read_date_tags(path: Path) -> dict[str, str]:
     return {
         name: value
         for name, value in tags.items()
-        if ":" in name
-        and name.split(":")[0] not in _NON_EMBEDDED_GROUPS
-        and isinstance(value, str)
-        and _EXIFTOOL_DATE.match(value)
+        if ":" in name and name.split(":")[0] not in _NON_EMBEDDED_GROUPS
     }
 
 
@@ -297,6 +325,13 @@ def _set_all_dates_video(
             capture_output=True,
         )
         before = _read_date_tags(out_path)
+    lists = {
+        name: value
+        for name, value in _read_date_list_tags(out_path).items()
+        if name not in _KEPT_DATE_LISTS
+    }
+    if lists:
+        raise RuntimeError(f"lists of dates not handled: {lists}")
     if before:
         subprocess.run(
             ["exiftool", "-overwrite_original", "-api", "QuickTimeUTC=1"]
@@ -350,7 +385,10 @@ def set_all_dates_video(
     Keys/ItemList/XMP dates, ...) is overwritten with `dt`; no tag is created,
     since an MP4/MOV always carries its container and track dates. The XMP
     "Pantry" of Adobe exports, a copy of the metadata of the source files of a
-    montage (whose dates are not those of the video), is removed. The
+    montage (whose dates are not those of the video), is removed. Lists of
+    dates are left as they are if known to be harmless (the save history of
+    Adobe software, which gives the true dates of the editing work), and make
+    the operation fail otherwise. The
     filesystem modification, access and (on Windows) creation times are set
     too. The tags are read back afterwards:
 

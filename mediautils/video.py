@@ -577,7 +577,8 @@ def write_precise_start(
                 f"-XMP-xmpDM:StartTimecodeTimeValue={tc[1]}",
             ]
     subprocess.run(
-        ["exiftool", "-overwrite_original", *args, str(path)],
+        # -P: keep the filesystem modification time of the file.
+        ["exiftool", "-overwrite_original", "-P", *args, str(path)],
         check=True,
         capture_output=True,
     )

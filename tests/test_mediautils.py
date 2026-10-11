@@ -1,5 +1,6 @@
 """Tests for `mediautils` package."""
 
+import os
 import shutil
 import struct
 import subprocess
@@ -209,7 +210,10 @@ def test_write_precise_start(tmp_path):
         check=True,
         capture_output=True,
     )
+    mtime = datetime(2025, 4, 5, 20, 55, 22).timestamp()
+    os.utime(path, (mtime, mtime))
     write_precise_start(path, datetime(2025, 4, 5, 20, 55, 22, 668000), frame_rate=25)
+    assert path.stat().st_mtime == mtime  # file times are kept
     out = subprocess.run(
         [
             "exiftool",

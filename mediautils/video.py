@@ -3,7 +3,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from shutil import copy2
 from zoneinfo import ZoneInfo
@@ -19,6 +19,9 @@ _NON_EMBEDDED_GROUPS = {"System", "Composite", "ExifTool", "File"}
 # Date tags that devices store in UTC without saying so (exiftool shows them
 # naive), as opposed to local wall-clock time.
 _UTC_TAGS = {"Panasonic:TimeStamp"}
+# Accepted gap between an unwritable date tag and the target datetime: a Lumix
+# truncates sub-seconds in its EXIF dates but rounds them in its XML dates.
+_UNWRITABLE_TOLERANCE = timedelta(seconds=1)
 
 
 def set_time_video(
@@ -215,7 +218,9 @@ def _set_all_dates_video(
             continue
         if name in _UTC_TAGS and file_offset is None:
             file_offset = _read_file_offset(out_path)
-        if _wall_clock(name, read, file_offset) == dt:
+        wall = _wall_clock(name, read, file_offset)
+        # Devices truncate or round sub-seconds depending on the tag.
+        if wall is not None and abs(wall - dt) <= _UNWRITABLE_TOLERANCE:
             unwritable[name] = read
         else:
             wrong[name] = read
@@ -247,9 +252,9 @@ def set_all_dates_video(
     - a tag holding `dt` is fine;
     - a tag exiftool cannot write (e.g. Panasonic's ``TimeStamp`` or the dates
       of the XML clip metadata of Lumix cameras) is accepted if it already
-      denotes the wall-clock time `dt` (offset ignored; a tag stored in UTC by
-      the camera is converted with the offset the camera recorded), and
-      reported;
+      denotes the wall-clock time `dt`, give or take one second (offset
+      ignored; a tag stored in UTC by the camera is converted with the offset
+      the camera recorded), and reported;
     - any other tag makes the whole operation fail, and no copy is left.
 
     QuickTime dates are stored in UTC, as phones do; `dt` is converted using

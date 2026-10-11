@@ -11,6 +11,13 @@ _WA_PATTERN = re.compile(r"^(?:IMG|VID)-(\d{4})(\d{2})(\d{2})-")
 # ``YYYYMMDD_HHMMSS...``. Each regex is matched against the file stem and must
 # capture year, month, day, hour, minute, second (in that order). To support a
 # new source, add one line here (and a doctest to :func:`standardize_name`).
+# Standardized names whose prefix must be recomputed: an earlier renaming took
+# the end of the recording (from the metadata) while the phone's own name,
+# kept after the prefix, gives its start in the phone's local time.
+_RESTAMP_PATTERN = re.compile(
+    r"^\d{8}_\d{6}_(VID(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:_.*)?)$"
+)
+
 _KNOWN_FORMATS: list[tuple[str, re.Pattern]] = [
     (
         "Android phone video (VID_YYYYMMDD_HHMMSS[mmm])",
@@ -161,9 +168,12 @@ def standardize_name(path: str | os.PathLike) -> tuple[str, datetime]:
     """Compute the standardized name of a file and the datetime it encodes.
 
     A name that is already standardized (``YYYYMMDD_HHMMSS...``) is kept as
-    is. A name following one of the known source conventions is prefixed with
-    ``YYYYMMDD_HHMMSS_``, keeping the original name in full so that it is never
-    lost (even if the date and time then appear twice).
+    is, with one exception: ``YYYYMMDD_HHMMSS_VIDyyyymmddhhmmss...``, whose
+    prefix is replaced by the datetime of the phone's own name (start of the
+    recording, local time where it was filmed). A name following one of the
+    known source conventions is prefixed with ``YYYYMMDD_HHMMSS_``, keeping the
+    original name in full so that it is never lost (even if the date and time
+    then appear twice).
 
     Parameters
     ----------
@@ -188,6 +198,15 @@ def standardize_name(path: str | os.PathLike) -> tuple[str, datetime]:
         >>> standardize_name("20240131_181253_blabla.mp4")
         ('20240131_181253_blabla.mp4', datetime.datetime(2024, 1, 31, 18, 12, 53))
 
+    Prefix recomputed from the phone's own name (end of recording -> start;
+    MGifier suffixes kept):
+
+        >>> standardize_name("20251126_185311_VID20251126185303.mp4")
+        ('20251126_185303_VID20251126185303.mp4', datetime.datetime(2025, 11, 26, 18, 53, 3))
+
+        >>> standardize_name("20260611_125751_VID20260611195724_MG.mp4")
+        ('20260611_195724_VID20260611195724_MG.mp4', datetime.datetime(2026, 6, 11, 19, 57, 24))
+
     Android phone video (milliseconds dropped from the datetime):
 
         >>> standardize_name("some/dir/VID_20190924_162534168.mp4")
@@ -204,6 +223,10 @@ def standardize_name(path: str | os.PathLike) -> tuple[str, datetime]:
         ValueError: Unknown file name convention: MVI_1234.MOV
     """
     path = Path(path)
+    match = _RESTAMP_PATTERN.match(path.stem)
+    if match:
+        dt = datetime(*(int(g) for g in match.groups()[1:]))
+        return f"{dt:%Y%m%d_%H%M%S}_{match.group(1)}{path.suffix}", dt
     if _PATTERN.match(path.stem):
         return path.name, _file_name_to_datetime(path.stem)
     for _, pattern in _KNOWN_FORMATS:

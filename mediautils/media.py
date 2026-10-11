@@ -174,8 +174,9 @@ def process_videos(
 
     Files that cannot be processed (unknown naming convention, extension that
     is not a video, name already taken in `out_dir`, date that cannot be set)
-    are left untouched, produce no output, and are listed at the end, as are
-    the processed files carrying dates exiftool cannot write.
+    are left untouched, produce no output, and are listed at the end. Dates
+    exiftool cannot write but that already give the right time are accepted
+    silently.
 
     Parameters
     ----------
@@ -195,7 +196,6 @@ def process_videos(
     out_dir = Path(out_dir)
     results = []
     problems = []
-    kept = []
     for path in sorted(in_dir.rglob("*")):
         if not path.is_file():
             continue
@@ -214,7 +214,7 @@ def process_videos(
             continue
         print(f"{rel} -> {name}")
         try:
-            out_path, unwritable = set_all_dates_video(
+            out_path, _ = set_all_dates_video(
                 path, dt, out_dir=target_dir, out_name=name, tz=tz
             )
         except RuntimeError as error:
@@ -222,16 +222,6 @@ def process_videos(
             problems.append(f"{rel}: {error.__cause__ or error}")
             continue
         results.append(out_path)
-        if unwritable:
-            kept.append(f"{rel}: {unwritable}")
-    if kept:
-        print()
-        print(
-            f"!!! {len(kept)} file(s) processed, but with dates exiftool cannot "
-            "write, left as they were (they already give the right time):"
-        )
-        for line in kept:
-            print(f"!!!   {line}")
     if problems:
         print()
         print(f"!!! {len(problems)} file(s) NOT processed (left in {in_dir}):")

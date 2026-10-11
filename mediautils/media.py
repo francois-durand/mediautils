@@ -163,6 +163,7 @@ def process_videos(
     in_dir: str | os.PathLike = "in",
     out_dir: str | os.PathLike = "out",
     tz: str = "Europe/Paris",
+    shift: timedelta = timedelta(0),
 ) -> list[Path]:
     """Standardize the names of videos and set all their dates accordingly.
 
@@ -186,6 +187,11 @@ def process_videos(
         Directory where processed videos are saved.
     tz : str
         IANA timezone in which the datetimes of the file names are expressed.
+    shift : timedelta
+        Correction added to the datetime of each (standardized) name, e.g. for
+        a camera whose clock was off, or to switch to the local time of a trip
+        abroad. The prefix of the name is changed accordingly, and so are the
+        dates exiftool cannot write (Lumix EXIF block and XML metadata).
 
     Returns
     -------
@@ -208,6 +214,9 @@ def process_videos(
         except ValueError:
             problems.append(f"{rel}: unknown file name convention")
             continue
+        if shift:
+            dt += shift
+            name = replace_datetime_prefix(name, dt)
         target_dir = out_dir / rel.parent
         if (target_dir / name).exists():
             problems.append(f"{rel}: {name} already exists in {target_dir}")
@@ -215,7 +224,7 @@ def process_videos(
         print(f"{rel} -> {name}")
         try:
             out_path, _ = set_all_dates_video(
-                path, dt, out_dir=target_dir, out_name=name, tz=tz
+                path, dt, out_dir=target_dir, out_name=name, tz=tz, locked_shift=shift
             )
         except RuntimeError as error:
             print("    REFUSED")

@@ -1,8 +1,9 @@
 """Tests for `mediautils` package."""
 
 import shutil
+import struct
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from click.testing import CliRunner
@@ -75,6 +76,42 @@ def test_process_videos(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "MVI_1234.mp4: unknown file name convention" in output
     assert "notes.txt: not a video extension" in output
+
+
+def _atom(kind: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I", 8 + len(payload)) + kind + payload
+
+
+def test_patch_locked_dates(tmp_path):
+    """Locked dates are shifted in metadata atoms only, with the same length."""
+    from mediautils.video import _patch_locked_dates
+
+    exif, xml = b"2026:04:12 17:07:44", b"2026-04-12T17:07:45+01:00"
+    moov = _atom(b"moov", b"x" + exif + b"\x00" + exif + b"\x00")
+    meta = _atom(b"meta", b"<StartDate>" + xml + b"</StartDate>")
+    mdat = _atom(b"mdat", b"video" + exif + b"data")  # must not be touched
+    path = tmp_path / "v.mp4"
+    path.write_bytes(_atom(b"ftyp", b"isom") + moov + meta + mdat)
+    tags = {
+        "ExifIFD:DateTimeOriginal": "2026:04:12 17:07:44",
+        "ExifIFD:CreateDate": "2026:04:12 17:07:44",
+        "XML:StartDate": "2026:04:12 17:07:45+01:00",
+    }
+
+    _patch_locked_dates(path, tags, timedelta(minutes=-15))
+
+    data = path.read_bytes()
+    assert data.count(b"2026:04:12 16:52:44") == 2
+    assert b"2026-04-12T16:52:45+01:00" in data
+    assert data.endswith(mdat)
+
+    # A date found a different number of times than expected: nothing changes.
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match="found 2 time"):
+        _patch_locked_dates(
+            path, {"ExifIFD:CreateDate": "2026:04:12 16:52:44"}, timedelta(hours=1)
+        )
+    assert path.read_bytes() == before
 
 
 def test_command_line_interface():

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -184,16 +185,101 @@ def _read_file_offset(path: Path) -> str | None:
     return lines[0] if lines else None
 
 
+def _shift_date_text(text: str, delta: timedelta) -> str:
+    """Shift a date written as text, keeping its exact layout and any offset.
+
+    Examples
+    --------
+        >>> _shift_date_text("2026:04:12 17:07:44", timedelta(minutes=-15))
+        '2026:04:12 16:52:44'
+
+        >>> _shift_date_text("2026-06-12T23:40:07+01:00", timedelta(hours=6, minutes=45))
+        '2026-06-13T06:25:07+01:00'
+    """
+    match = re.match(
+        r"^(\d{4})([:-])(\d{2})[:-](\d{2})([ T])(\d{2}):(\d{2}):(\d{2})", text
+    )
+    if not match:
+        raise ValueError(f"Unexpected date text: {text}")
+    year, sep, month, day, middle, hour, minute, second = match.groups()
+    new = datetime(*map(int, (year, month, day, hour, minute, second))) + delta
+    return new.strftime(f"%Y{sep}%m{sep}%d{middle}%H:%M:%S") + text[match.end() :]
+
+
+def _patch_locked_dates(path: Path, tags: dict[str, str], delta: timedelta) -> None:
+    """Shift, in place, date tags that exiftool cannot write.
+
+    Such dates (Lumix EXIF block, ``Panasonic:TimeStamp``, XML clip metadata)
+    are plain fixed-length text: each is replaced by the shifted text, of the
+    same length, so that nothing else in the file moves. Only the top-level
+    atoms other than ``mdat`` (the audio/video data) are searched, and each
+    date text must be found exactly as many times as there are tags holding
+    it, otherwise nothing is changed.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the MP4/MOV file, modified in place.
+    tags : dict[str, str]
+        The tags to shift, as read by exiftool (name to value).
+    delta : timedelta
+        The shift to apply.
+
+    Raises
+    ------
+    RuntimeError
+        If a date text is not found the expected number of times.
+    """
+    expected = {}
+    for value in tags.values():
+        # exiftool shows XML dates as "YYYY:MM:DD HH:MM:SS+HH:MM", stored
+        # "YYYY-MM-DDTHH:MM:SS+HH:MM"; EXIF-like dates are stored as shown.
+        if re.search(r"[+-]\d{2}:\d{2}$", value):
+            text = value[:4] + "-" + value[5:7] + "-" + value[8:10] + "T" + value[11:]
+        else:
+            text = value
+        expected[text] = expected.get(text, 0) + 1
+    with open(path, "r+b") as f:
+        atoms = []
+        size = os.fstat(f.fileno()).st_size
+        pos = 0
+        while pos < size:
+            f.seek(pos)
+            atom_size, kind = struct.unpack(">I4s", f.read(8))
+            if atom_size == 1:
+                atom_size = struct.unpack(">Q", f.read(8))[0]
+            elif atom_size == 0:
+                atom_size = size - pos
+            if kind != b"mdat":
+                f.seek(pos)
+                atoms.append([pos, bytearray(f.read(atom_size))])
+            pos += atom_size
+        for text, count in expected.items():
+            old = text.encode("ascii")
+            found = sum(content.count(old) for _, content in atoms)
+            if found != count:
+                raise RuntimeError(
+                    f"locked date {text!r} found {found} time(s), expected {count}"
+                )
+        for text in expected:
+            old = text.encode("ascii")
+            new = _shift_date_text(text, delta).encode("ascii")
+            for atom in atoms:
+                atom[1] = atom[1].replace(old, new)
+        for start, content in atoms:
+            f.seek(start)
+            f.write(content)
+
+
 def _set_all_dates_video(
-    path: Path, dt: datetime, out_path: Path, tz: str
+    path: Path, dt: datetime, out_path: Path, tz: str, locked_shift: timedelta
 ) -> dict[str, str]:
     """Do the work of :func:`set_all_dates_video`.
 
     Returns
     -------
     dict[str, str]
-        The date tags exiftool cannot write but that already hold the
-        wall-clock time `dt`, with their values.
+        The date tags exiftool cannot write, with their final values.
     """
     copy2(path, out_path)
     aware = dt.replace(tzinfo=ZoneInfo(tz))
@@ -207,7 +293,6 @@ def _set_all_dates_video(
             check=True,
             capture_output=True,
         )
-    file_offset = None
     unwritable, wrong = {}, {}
     for name, read in _read_date_tags(out_path).items():
         parsed = _parse_exiftool_date(read)
@@ -215,14 +300,19 @@ def _set_all_dates_video(
             continue
         if read != before.get(name):
             wrong[name] = read  # written, but with a wrong value: a bug
-            continue
-        if name in _UTC_TAGS and file_offset is None:
-            file_offset = _read_file_offset(out_path)
-        wall = _wall_clock(name, read, file_offset)
-        # Devices truncate or round sub-seconds depending on the tag.
-        if wall is not None and abs(wall - dt) <= _UNWRITABLE_TOLERANCE:
-            unwritable[name] = read
         else:
+            unwritable[name] = read
+    if wrong:
+        raise RuntimeError(f"wrong dates left: {wrong}")
+    if unwritable and locked_shift:
+        _patch_locked_dates(out_path, unwritable, locked_shift)
+        after = _read_date_tags(out_path)
+        unwritable = {name: after.get(name, "") for name in unwritable}
+    file_offset = _read_file_offset(out_path) if unwritable else None
+    for name, read in unwritable.items():
+        wall = _wall_clock(name, read, file_offset) if read else None
+        # Devices truncate or round sub-seconds depending on the tag.
+        if wall is None or abs(wall - dt) > _UNWRITABLE_TOLERANCE:
             wrong[name] = read
     if wrong:
         raise RuntimeError(f"wrong dates left: {wrong}")
@@ -240,6 +330,7 @@ def set_all_dates_video(
     out_dir: str | os.PathLike = "out",
     out_name: str | None = None,
     tz: str = "Europe/Paris",
+    locked_shift: timedelta = timedelta(0),
 ) -> tuple[Path, dict[str, str]]:
     """Write a copy of a video with every date it carries set to `dt`.
 
@@ -250,11 +341,13 @@ def set_all_dates_video(
     too. The tags are read back afterwards:
 
     - a tag holding `dt` is fine;
-    - a tag exiftool cannot write (e.g. Panasonic's ``TimeStamp`` or the dates
-      of the XML clip metadata of Lumix cameras) is accepted if it already
-      denotes the wall-clock time `dt`, give or take one second (offset
-      ignored; a tag stored in UTC by the camera is converted with the offset
-      the camera recorded), and reported;
+    - a tag exiftool cannot write (e.g. the EXIF block, Panasonic's
+      ``TimeStamp`` or the XML clip metadata of Lumix cameras) is first
+      shifted by `locked_shift`, if any, directly in the file (see
+      :func:`_patch_locked_dates`); it is then accepted if it denotes the
+      wall-clock time `dt`, give or take one second (offset ignored; a tag
+      stored in UTC by the camera is converted with the offset the camera
+      recorded), and reported;
     - any other tag makes the whole operation fail, and no copy is left.
 
     QuickTime dates are stored in UTC, as phones do; `dt` is converted using
@@ -274,12 +367,16 @@ def set_all_dates_video(
         Output file name. If ``None``, the original file name is kept.
     tz : str
         IANA timezone in which `dt` is expressed.
+    locked_shift : timedelta
+        Shift to apply to the date tags exiftool cannot write: the difference
+        between `dt` and the datetime these tags hold (e.g. the correction of
+        a camera clock that was off).
 
     Returns
     -------
     tuple[Path, dict[str, str]]
-        Path to the output file, and the tags exiftool could not write but
-        that already denote `dt` (name to value).
+        Path to the output file, and the tags exiftool could not write, with
+        their final values (name to value).
 
     Raises
     ------
@@ -291,7 +388,7 @@ def set_all_dates_video(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / (out_name or path.name)
     try:
-        unwritable = _set_all_dates_video(path, dt, out_path, tz)
+        unwritable = _set_all_dates_video(path, dt, out_path, tz, locked_shift)
     except (RuntimeError, subprocess.CalledProcessError) as error:
         out_path.unlink(missing_ok=True)
         raise RuntimeError(f"{path.name}: {error}") from error

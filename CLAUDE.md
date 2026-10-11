@@ -30,21 +30,40 @@ uv run sphinx-build docs docs/_build/html   # Build docs locally
 
 ## System Dependencies
 
-- **ffmpeg** must be on `PATH` for video metadata operations (`set_time_video`).
-- **exiftool** must be on `PATH` for RAW image metadata operations (`set_time_raw`) — the `exif` package only parses JPEG APP1 segments, not TIFF-based RAW formats (e.g. Panasonic `.rw2`).
+- **ffmpeg** (with ffprobe) must be on `PATH` for video operations (`set_time_video`, reading soundtracks for `audiosync`, stream checks).
+- **exiftool** must be on `PATH` for RAW image metadata (`set_time_raw`) — the `exif` package only parses JPEG APP1 segments, not TIFF-based RAW formats (e.g. Panasonic `.rw2`) — and for all the video date work (`set_all_dates_video`, `write_precise_start`).
+- **numpy** (Python dependency) for `audiosync`.
 
 ## Architecture
 
-- `mediautils/file_name.py` — file name parsing (datetime/date extraction from standardized and WhatsApp names)
+- `mediautils/file_name.py` — file name parsing (datetime/date extraction from standardized and WhatsApp names). `standardize_name()` gives the standardized name and datetime of a file; the naming conventions of the sources met so far are listed in `_KNOWN_FORMATS`: **add one line there for each new source**, so that the scripts handle more and more by themselves (unknown conventions must be refused loudly, never guessed).
 - `mediautils/image.py` — image operations (EXIF metadata, orientation detection, resize, batch dispatch)
-- `mediautils/video.py` — video metadata manipulation (MP4 `creation_time` via ffmpeg)
-- `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_whatsapp_files`, `process_date_subdirs`, `process_datetime_filenames`, `gather_yes_no`)
+- `mediautils/video.py` — video metadata: `set_all_dates_video` (every date of a video set to the date of its name, via exiftool, read back and checked), `write_precise_start` (start to the ms and timecode, in XMP), `set_time_video` (older, ffmpeg remux, `creation_time` only), `rotate_video`
+- `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_videos`, `process_whatsapp_files`, `process_date_subdirs`, `process_datetime_filenames`, `process_clock_shift`, `process_timezone_shift`, `gather_yes_no`)
+- `mediautils/audiosync.py` — offset between two recordings of the same event from their soundtracks (GCC-PHAT), e.g. to align several cameras of a concert
+- `mediautils/shotcut.py` — maintenance of Shotcut projects (`.mlt`): make links relative, follow renamed files
 - `mediautils/cli.py` — Click-based CLI entry point (registered as `mediautils` console script)
 - `tests/` — pytest tests (also tests the CLI via `click.testing.CliRunner`)
 
+The user runs these functions through `.bat` files (one-liners `uv run --project ... python -c "from mediautils import f; f()"`) placed next to `in`/`out` folders; new features should be callable that way.
+
 ## Design Principles
 
-- **No in-place modification**: functions write copies to an output directory, never modify source files.
+- **No in-place modification**: functions write copies to an output directory, never modify source files. (Low-level helpers documented as modifying a file in place exist, e.g. `write_precise_start`, `relink_project`; they are applied to copies.)
+- **Dates of a video** (decided with the user, see the docstrings of `set_all_dates_video` and `process_videos`):
+  - every date the file carries takes the date of its name; the name gives the **start** of the recording, in local wall-clock time;
+  - only the date tags **already present** are rewritten — never use exiftool `-time:all=`, which creates about a hundred junk tags; QuickTime dates are written in UTC (`-api QuickTimeUTC=1`), DST-aware;
+  - dates exiftool cannot write (Lumix: EXIF block, `Panasonic:TimeStamp` stored in UTC, XML clip metadata) are accepted if they give the same wall-clock time ±1 s, or shifted in place by same-length text patching (`_patch_locked_dates`, outside `mdat` only);
+  - the XMP Pantry of Adobe exports (metadata of the source files of a montage) is removed; the Adobe save history (`XMP-xmpMM:HistoryWhen`) is the **only** exception kept with its own dates; any other list of dates makes the file refused;
+  - a file that cannot be handled is refused and listed, its copy removed, and the batch goes on.
+- **Precision beyond the second** (multi-camera sync) goes to XMP only (`xmpDM:shotDate`, `xmpDM:startTimecode`): names and QuickTime dates stay to the second for sorting; no real timecode track (that would need an ffmpeg remux, which drops maker-specific blocks).
+
+## Pitfalls
+
+- exiftool on Windows misreads command-line paths with characters outside the ANSI code page (e.g. "→" in folder names): pass such paths through an argument file (`-charset filename=utf8 -@ file`).
+- exiftool `-overwrite_original` rewrites the file and resets its modification time unless `-P` is given.
+- ffmpeg cannot write a file onto itself (`-i X ... -y X` fails): write to a temporary file.
+- Phones and cameras often record the **end** of a video in its metadata, and old renamings sometimes took that end time: check against the duration before trusting a date.
 
 ## CI
 

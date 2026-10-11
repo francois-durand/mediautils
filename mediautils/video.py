@@ -23,6 +23,9 @@ _UTC_TAGS = {"Panasonic:TimeStamp"}
 # Accepted gap between an unwritable date tag and the target datetime: a Lumix
 # truncates sub-seconds in its EXIF dates but rounds them in its XML dates.
 _UNWRITABLE_TOLERANCE = timedelta(seconds=1)
+# Tags of the XMP "Pantry" of Adobe exports (Premiere...), which holds a copy of
+# the metadata of the source files of a montage; removed as a whole.
+_PANTRY_PREFIX = "XMP-xmpMM:Pantry"
 
 
 def set_time_video(
@@ -285,6 +288,15 @@ def _set_all_dates_video(
     aware = dt.replace(tzinfo=ZoneInfo(tz))
     value = aware.isoformat(sep=" ").replace("-", ":", 2)  # 2019:09:24 16:40:38+02:00
     before = _read_date_tags(out_path)
+    if any(name.startswith(_PANTRY_PREFIX) for name in before):
+        # Adobe's copy of the metadata of the source files of a montage: their
+        # dates are not those of this video, and exiftool cannot write them.
+        subprocess.run(
+            ["exiftool", "-overwrite_original", "-XMP-xmpMM:Pantry=", str(out_path)],
+            check=True,
+            capture_output=True,
+        )
+        before = _read_date_tags(out_path)
     if before:
         subprocess.run(
             ["exiftool", "-overwrite_original", "-api", "QuickTimeUTC=1"]
@@ -336,7 +348,9 @@ def set_all_dates_video(
 
     Every date tag already present in the file (container and track dates,
     Keys/ItemList/XMP dates, ...) is overwritten with `dt`; no tag is created,
-    since an MP4/MOV always carries its container and track dates. The
+    since an MP4/MOV always carries its container and track dates. The XMP
+    "Pantry" of Adobe exports, a copy of the metadata of the source files of a
+    montage (whose dates are not those of the video), is removed. The
     filesystem modification, access and (on Windows) creation times are set
     too. The tags are read back afterwards:
 

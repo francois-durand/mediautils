@@ -136,11 +136,21 @@ def set_time_image(
     -------
     Path
         Path to the output file.
+
+    Notes
+    -----
+    If the ``exif`` package cannot parse the file, falls back on
+    :func:`set_time_raw` (requires ``exiftool`` on `PATH`).
     """
     path = Path(path)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    image = ExifImage(path)
+    try:
+        image = ExifImage(path)
+    except Exception:
+        # The ``exif`` package chokes on some JPEGs (e.g. a non-EXIF APP1
+        # segment placed first); exiftool copes with them.
+        return set_time_raw(path, dt, out_dir=out_dir, out_name=out_name, offset=offset)
     image.datetime_original = dt.strftime(DATETIME_STR_FORMAT)
     if offset is not None:
         image.offset_time_original = offset

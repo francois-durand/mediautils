@@ -229,3 +229,19 @@ def test_resync_project(tmp_path):
     Q = SyncProject(tmp_path / "q.mlt", reference=r"_P\d{7}\.wav$")
     assert Q.segments["A"][0][3] == round(5 * FPS) - round(5 * FPS)  # t0 = 0
     assert {t0 for _, _, _, t0 in Q.segments["L"]} == {round(5 * FPS)}
+    # the reference placed 3 frames later: the other camera, whose track starts at its first frame,
+    # must start 3 frames after the head of its track -> a blank is inserted before it
+    src2 = make_sync_project(
+        tmp_path / "p2.mlt",
+        ref="x_P1000001.wav",
+        other="y_MVI_0001.wav",
+        ref_start=5.0 + 3 / FPS,
+        ref_len=30.0,
+        other_len=30.0,
+    )
+    resync_project(src2, tmp_path / "q2.mlt", reference=r"_P\d{7}\.wav$")
+    Q2 = SyncProject(tmp_path / "q2.mlt", reference=r"_P\d{7}\.wav$")
+    ((s, e, _, t0),) = Q2.segments["A"]
+    assert (
+        t0 == s > 0
+    )  # a blank before the other camera, which starts at its first frame

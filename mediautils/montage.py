@@ -289,12 +289,12 @@ def resync_project(
                     }
                 )
                 pos += o - i + 1
-        playlists.append(items)
+        playlists.append((pl, items))
 
     ref_re = re.compile(reference, re.I)
     t0_now = {}
     ref_video = set()
-    for items in playlists:
+    for _, items in playlists:
         for it in items:
             for _, p, t0 in it.get("tracks", []):
                 t0_now.setdefault(resource[p], set()).add(t0)
@@ -322,9 +322,30 @@ def resync_project(
             f"{target[r]} (ideal {ref_t0 + s.offset * C.fps:.2f})"
         )
 
-    for items in playlists:
+    for pl, items in playlists:
         for _ in range(100):
             changed = False
+            if items and items[0]["kind"] != "blank":
+                # the track starts on a source placed later: a blank at its head
+                lack = max(
+                    target[resource[p]] - items[0]["S"]
+                    for _, p, _ in items[0]["tracks"]
+                )
+                if lack > 0:
+                    el = ET.Element("blank", length=C.string(0))
+                    first = next(
+                        i for i, x in enumerate(pl) if x.tag in ("blank", "entry")
+                    )
+                    pl.insert(first, el)
+                    items.insert(
+                        0,
+                        {
+                            "el": el,
+                            "kind": "blank",
+                            "S": items[0]["S"],
+                            "E": items[0]["S"],
+                        },
+                    )
             for k, it in enumerate(items):
                 for _, p, _ in it.get("tracks", []):
                     t0 = target[resource[p]]
@@ -349,7 +370,7 @@ def resync_project(
             raise RuntimeError("could not place the borders")
 
     uses = {}
-    for items in playlists:
+    for _, items in playlists:
         for it in items:
             n = it["E"] - it["S"]
             if it["kind"] == "blank":

@@ -607,7 +607,8 @@ def build_montage(
     dst : str | os.PathLike
         The new project.
     cut_end : float | None
-        If given, every track is cut there (seconds).
+        If given, every track is cut there (seconds). By default, the project is
+        cut at the last frame filmed by a camera (an audio track may be longer).
     min_shot : float
         Minimum length of a shot, in seconds.
     overwrite : bool
@@ -628,7 +629,8 @@ def build_montage(
     if dst.exists() and not overwrite:
         raise FileExistsError(dst)
     P, C = project, project.clock
-    end = P.end if cut_end is None else round(cut_end * P.fps)
+    video_end = max(e for segs in P.segments.values() for _, e, _, _ in segs)
+    end = min(P.end, video_end) if cut_end is None else round(cut_end * P.fps)
     bt = np.asarray(beats, dtype=float)
 
     def snap(t):
@@ -760,7 +762,7 @@ def build_montage(
                     cid, t0 = P.covering("A", a, b)
                     items.append((a, b, cid, t0, zoom))
         fill(pl, items)
-    if cut_end is not None:
+    if end < P.end:
         _trim_end(root, C, end, audio=trim_audio)
     _write(tree, dst)
     return merged

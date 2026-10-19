@@ -670,8 +670,16 @@ def build_montage(
                 if not films(other, x, y):
                     raise ValueError(f"no camera films frames {x}-{y}")
                 segs.append([x, y, other, None])
-    merged = []
+    # First glue back the pieces of a same shot (split at the borders of files or of `blocked`
+    # intervals), so that a piece is not mistaken for a short shot and absorbed.
+    glued = []
     for seg in segs:
+        if glued and glued[-1][2:] == seg[2:] and glued[-1][1] == seg[0]:
+            glued[-1][1] = seg[1]
+        else:
+            glued.append(seg)
+    merged = []
+    for seg in glued:
         if merged and merged[-1][2:] == seg[2:] and merged[-1][1] == seg[0]:
             merged[-1][1] = seg[1]
         elif (

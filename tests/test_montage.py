@@ -178,6 +178,17 @@ def test_build_montage_blocked(tmp_path):
         )
 
 
+def test_build_montage_blocked_keeps_other_shots(tmp_path):
+    # a block on L starting inside a shot of A must not cut that shot into pieces that get absorbed
+    P = SyncProject(make_sync_project(tmp_path / "p.mlt"))
+    zooms = {"zA": ("A", 960, 540, 2.0), "zL": ("L", 960, 540, 2.0)}
+    shots = [(0, "A"), (10, "zL"), (20, "zA"), (24, "L")]
+    segs = build_montage(
+        P, shots, zooms, [], tmp_path / "m.mlt", blocked={"L": [(21.0, 22.5)]}
+    )
+    assert [round(20 * FPS), round(24 * FPS), "A", "zA"] in segs
+
+
 def test_trim_end_refuses_cross_fade(tmp_path):
     p = make_sync_project(tmp_path / "p.mlt")
     with pytest.raises(ValueError):

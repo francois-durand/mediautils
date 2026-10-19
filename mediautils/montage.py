@@ -615,7 +615,8 @@ def build_montage(
     its track, split where it is zoomed; the other camera (``"A"``, on the track
     above) is shown where the montage chooses it, blanks elsewhere. Cuts are moved
     to the nearest beat. A shot on a camera that does not film at that moment (or
-    is `blocked`) falls back on the other camera; shots shorter than `min_shot`
+    is `blocked`) falls back on the other camera, and frames that no camera may show
+    are left black (camera ``None`` in the result); shots shorter than `min_shot`
     are absorbed by a neighbour.
 
     Parameters
@@ -672,8 +673,10 @@ def build_montage(
 
     def films(cam, a, b):
         """Whether `cam` films frames [a, b) and may be shown there."""
-        return P.covering(cam, a, b) is not None and not any(
-            a < hb and ha < b for ha, hb in hidden.get(cam, [])
+        return (
+            cam is not None
+            and P.covering(cam, a, b) is not None
+            and not any(a < hb and ha < b for ha, hb in hidden.get(cam, []))
         )
 
     borders = set(P.borders()) | {
@@ -692,9 +695,8 @@ def build_montage(
                 segs.append([x, y, cam, zoom])
             else:
                 other = "L" if cam == "A" else "A"
-                if not films(other, x, y):
-                    raise ValueError(f"no camera films frames {x}-{y}")
-                segs.append([x, y, other, None])
+                # no camera at all (e.g. the first frames before a source): left black
+                segs.append([x, y, other if films(other, x, y) else None, None])
     # First glue back the pieces of a same shot (split at the borders of files or of `blocked`
     # intervals), so that a piece is not mistaken for a short shot and absorbed.
     glued = []
@@ -779,16 +781,24 @@ def build_montage(
         )
         items = []
         if cam == "L":
+            # The reference camera lies under the other one: plain wherever a camera is shown (so that
+            # the cuts of the other camera need no cut here), zoomed where chosen zoomed, and absent
+            # where no camera may be shown (black).
             for s, e, cid, t0 in P.segments["L"]:
-                last = s
                 for a, b, c, zoom in merged:
-                    if c == "L" and zoom and s <= a and b <= e:
-                        if a > last:
-                            items.append((last, a, cid, t0, None))
-                        items.append((a, b, cid, t0, zoom))
-                        last = b
-                if last < min(e, end):
-                    items.append((last, min(e, end), cid, t0, None))
+                    a, b = max(a, s), min(b, e, end)
+                    if b <= a or c is None:
+                        continue
+                    z = zoom if c == "L" else None
+                    if (
+                        items
+                        and items[-1][4] is None
+                        and z is None
+                        and items[-1][1] == a
+                    ):
+                        items[-1] = (items[-1][0], b, cid, t0, None)
+                    else:
+                        items.append((a, b, cid, t0, z))
         else:
             for a, b, c, zoom in merged:
                 if c == "A":

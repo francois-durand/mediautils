@@ -167,15 +167,18 @@ def test_build_montage_blocked(tmp_path):
         else:  # and in front of A from 40 s to the end
             assert b <= round(40 * FPS)
     assert {cam for _, _, cam, _ in segs} == {"A", "L"}
-    with pytest.raises(ValueError):  # nobody films 55-62 s if L is blocked too
-        build_montage(
-            P,
-            shots,
-            zooms,
-            [],
-            tmp_path / "n.mlt",
-            blocked={"L": [(50, None)], "A": [(40, None)]},
-        )
+    # nobody may be shown from 50 s if L is blocked too: left black
+    segs = build_montage(
+        P,
+        shots,
+        zooms,
+        [],
+        tmp_path / "n.mlt",
+        blocked={"L": [(50, None)], "A": [(40, None)]},
+    )
+    assert segs[-1][2] is None and segs[-1][0] == round(50 * FPS)
+    M = SyncProject(tmp_path / "n.mlt")
+    assert all(e <= round(50 * FPS) for v in M.segments.values() for _, e, _, _ in v)
 
 
 def test_build_montage_blocked_keeps_other_shots(tmp_path):

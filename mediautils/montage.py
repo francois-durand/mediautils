@@ -577,10 +577,17 @@ def nervous_shots(
 
     A section ends with a shot of at least 2 seconds: the last shot of the
     first section above lasts 10 s rather than leaving 2 s to a second one.
+    A shot equal to the previous one (at the start of a section) is skipped, so
+    that two shots do not merge into a long one:
+
+        >>> nervous_shots([(0, 8, ["A"]), (8, 20, ["A", "L"])])
+        [(0, 'A'), (8, 'L'), (12, 'A')]
     """
     shots, k = [], 0
     for a, b, cycle in sections:
         t, i = a, 0
+        if len(cycle) > 1 and shots and cycle[0] == shots[-1][1]:
+            i = 1
         while t < b - 2:
             shots.append((t, cycle[i % len(cycle)]))
             t += lengths[k % len(lengths)]
@@ -750,6 +757,10 @@ def build_montage(
         if b - a < ms and films(merged[k][2], a, a + ms) and nxt[1] - (a + ms) >= ms:
             merged[k][1] = nxt[0] = a + ms
         k += 1
+    # A last shot too short that nobody could absorb (e.g. the last frame, filmed by one camera only):
+    # the project ends before it.
+    if len(merged) > 1 and merged[-1][1] - merged[-1][0] < ms:
+        end = merged.pop()[0]
 
     tree = copy.deepcopy(P.tree)
     root = tree.getroot()

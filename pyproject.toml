@@ -25,6 +25,15 @@ dependencies = [
     "tzdata>=2025.2",
 ]
 
+[project.optional-dependencies]
+# Concert montage and sound (mediautils.montage.timeline_beats, mediautils.livesound).
+# Demucs itself is run apart (uv run --with demucs), it pulls PyTorch.
+concert = [
+    "librosa>=0.10 ; python_version < '3.14'",
+    "scipy>=1.11",
+    "soundfile>=0.12",
+]
+
 [project.urls]
 Repository = "https://github.com/francois-durand/mediautils"
 Documentation = "https://francois-durand.github.io/mediautils"

@@ -6,6 +6,22 @@ from mediautils.audiosync import audio_offset as audio_offset
 from mediautils.audiosync import read_audio as read_audio
 from mediautils.audiosync import sync_videos as sync_videos
 from mediautils.audiosync import SyncResult as SyncResult
+from mediautils.livesound import denoise_rushes as denoise_rushes
+from mediautils.livesound import loudness as loudness
+from mediautils.livesound import match_eq as match_eq
+from mediautils.livesound import mix_two_cameras as mix_two_cameras
+from mediautils.montage import build_montage as build_montage
+from mediautils.montage import contact_sheets as contact_sheets
+from mediautils.montage import export_project as export_project
+from mediautils.montage import extract_frames as extract_frames
+from mediautils.montage import MltClock as MltClock
+from mediautils.montage import nervous_shots as nervous_shots
+from mediautils.montage import resync_project as resync_project
+from mediautils.montage import SyncProject as SyncProject
+from mediautils.montage import timeline_beats as timeline_beats
+from mediautils.montage import trim_project_end as trim_project_end
+from mediautils.montage import trim_project_head as trim_project_head
+from mediautils.montage import use_single_audio as use_single_audio
 from mediautils.shotcut import project_files as project_files
 from mediautils.shotcut import relink_project as relink_project
 

@@ -33,6 +33,7 @@ uv run sphinx-build docs docs/_build/html   # Build docs locally
 - **ffmpeg** (with ffprobe) must be on `PATH` for video operations (`set_time_video`, reading soundtracks for `audiosync`, stream checks).
 - **exiftool** must be on `PATH` for RAW image metadata (`set_time_raw`) — the `exif` package only parses JPEG APP1 segments, not TIFF-based RAW formats (e.g. Panasonic `.rw2`) — and for all the video date work (`set_all_dates_video`, `write_precise_start`).
 - **numpy** (Python dependency) for `audiosync`.
+- Concert montage and sound: extra `concert` (`uv sync --extra concert`: librosa, scipy, soundfile — imported lazily), **melt** (`C:\Program Files\Shotcut\melt.exe`, Shotcut's engine) to render projects, and **uv** to run Demucs (`uv run --with demucs`, pulls PyTorch).
 
 ## Architecture
 
@@ -42,6 +43,8 @@ uv run sphinx-build docs docs/_build/html   # Build docs locally
 - `mediautils/media.py` — dispatchers and batch operations (`set_time`, `process_videos`, `process_whatsapp_files`, `process_date_subdirs`, `process_datetime_filenames`, `process_clock_shift`, `process_timezone_shift`, `gather_yes_no`)
 - `mediautils/audiosync.py` — offset between two recordings of the same event from their soundtracks (GCC-PHAT), e.g. to align several cameras of a concert
 - `mediautils/shotcut.py` — maintenance of Shotcut projects (`.mlt`): make links relative, follow renamed files
+- `mediautils/montage.py` — multi-camera montage of a concert song from a Shotcut synchronization project (one camera per video track; reference camera `"L"` = Lumix, other `"A"` = Andrea's): `SyncProject` (positions of the sources), `resync_project` (place every source to the frame from the soundtracks, keeping all edit points), `extract_frames` / `contact_sheets` / `timeline_beats` (look at the song), `nervous_shots` + `build_montage` (cuts on the beats, fixed zooms = Shotcut "Size, Position & Rotate"), `trim_project_head` / `trim_project_end`, `use_single_audio`, `export_project` (melt, crf 23 = Shotcut's default quality)
+- `mediautils/livesound.py` — sound of a song filmed by two cameras: `denoise_rushes` (Demucs `htdemucs`; the vocals stem, where crowd chatter goes, lowered by 20 dB where nobody sings nor speaks), `mix_two_cameras` (left 75 % A + 25 % L, right the reverse; single-camera parts equalized to the mix colour; quick 0.3 s switch on a beat or a pause), `loudness`, `match_eq`. The module docstring records the trials that failed (heavier models, gating, ms re-alignment)
 - `mediautils/cli.py` — Click-based CLI entry point (registered as `mediautils` console script)
 - `tests/` — pytest tests (also tests the CLI via `click.testing.CliRunner`)
 

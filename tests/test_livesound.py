@@ -53,6 +53,6 @@ def test_mix_two_cameras(tmp_path):
     import soundfile as sf
 
     y, ysr = sf.read(tmp_path / "mix.wav")
-    assert ysr == sr and y.shape == (round(P.end / FPS * sr), 2)
+    assert ysr == sr and y.shape == (round(P.video_end / FPS * sr), 2)
     with pytest.raises(FileExistsError):
         mix_two_cameras(P, tmp_path / "mix.wav")

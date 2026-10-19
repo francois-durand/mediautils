@@ -189,6 +189,16 @@ def test_build_montage_blocked_keeps_other_shots(tmp_path):
     assert [round(20 * FPS), round(24 * FPS), "A", "zA"] in segs
 
 
+def test_single_audio_not_longer_than_project(tmp_path):
+    # a sound longer than the pictures would show a white frame at the end
+    P = SyncProject(make_sync_project(tmp_path / "p.mlt"))
+    m = tmp_path / "m.mlt"
+    build_montage(P, [(0, "A")], {}, [], m, cut_end=40.0, trim_audio=False)
+    write_wav(tmp_path / "long.wav", np.zeros((45 * 1000, 2)), 1000)
+    use_single_audio(m, tmp_path / "f.mlt", "long.wav")
+    assert SyncProject(tmp_path / "f.mlt").end == round(40 * FPS)
+
+
 def test_trim_end_refuses_cross_fade(tmp_path):
     p = make_sync_project(tmp_path / "p.mlt")
     with pytest.raises(ValueError):

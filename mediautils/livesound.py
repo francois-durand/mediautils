@@ -282,7 +282,7 @@ def mix_two_cameras(
         ``(start, duration)``: silence before `start`, then a fade-in (for a project
         whose head is cut by :func:`~mediautils.montage.trim_project_head`).
     end_s : float | None
-        Length of the result (default: the length of the project).
+        Length of the result (default: up to the last frame filmed by a camera).
     tag : str
         Tag of the denoised files (see :func:`denoise_rushes`).
 
@@ -298,7 +298,8 @@ def mix_two_cameras(
         raise FileExistsError(dst)
     switch_in = switch_in or {}
     P = project
-    n = int(round((end_s if end_s is not None else P.end / P.fps) * SR))
+    # by default, up to the last frame filmed by a camera (an audio track of the project may be longer)
+    n = int(round((end_s if end_s is not None else P.video_end / P.fps) * SR))
     tracks = {}
     for name, t0 in P.rushes():
         x, sr = sf.read(

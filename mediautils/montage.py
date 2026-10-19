@@ -164,6 +164,11 @@ class SyncProject:
                 return cid, t0
         return None
 
+    @property
+    def video_end(self) -> int:
+        """Last frame filmed by a camera, plus one (an audio track may be longer)."""
+        return max(e for segs in self.segments.values() for _, e, _, _ in segs)
+
     def borders(self) -> list[int]:
         """Frames where a video clip starts or ends."""
         return sorted(
@@ -629,8 +634,7 @@ def build_montage(
     if dst.exists() and not overwrite:
         raise FileExistsError(dst)
     P, C = project, project.clock
-    video_end = max(e for segs in P.segments.values() for _, e, _, _ in segs)
-    end = min(P.end, video_end) if cut_end is None else round(cut_end * P.fps)
+    end = min(P.end, P.video_end) if cut_end is None else round(cut_end * P.fps)
     bt = np.asarray(beats, dtype=float)
 
     def snap(t):
@@ -969,11 +973,18 @@ def use_single_audio(
     if "shotcut:hash" in props:
         c.remove(props["shotcut:hash"])
     root.insert(list(root).index(audio[0]), c)
+    # Never longer than the project (the black background): past the last picture, Shotcut and melt show
+    # a white frame.
+    black = next((p for p in root if p.get("id") == "black"), None)
+    if black is not None:
+        n_used = min(n, C.frames(black.find("property[@name='length']").text))
+    else:  # pragma: no cover
+        n_used = n
     ET.SubElement(
         audio[0],
         "entry",
         producer="single_audio",
-        **{"in": C.string(0), "out": C.string(n - 1)},
+        **{"in": C.string(0), "out": C.string(n_used - 1)},
     )
     audio[0].find("property[@name='shotcut:name']").text = track_name
     for pl in audio[1:]:

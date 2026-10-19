@@ -4,6 +4,7 @@ Made for concerts recorded only by the microphones of two cameras (no mixing
 desk): a reference camera ``"L"`` (the Lumix, stereo, the better sound) and
 another one ``"A"`` (Andrea's Canon, mono), placed on both sides of the stage.
 Positions come from a synchronization project (:class:`~mediautils.montage.SyncProject`).
+Other sources of the project (e.g. ``"W"``, a WhatsApp video) are not used for the sound.
 
 - :func:`denoise_rushes`: the soundtrack of each camera is separated by Demucs
   (``htdemucs``) into vocals / drums / bass / other; the *vocals* stem is lowered by

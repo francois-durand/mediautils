@@ -1,9 +1,11 @@
 """Multi-camera montage of a concert song in Shotcut, from a synchronization project.
 
-The starting point is a Shotcut project (``.mlt``) where the videos of two cameras
+The starting point is a Shotcut project (``.mlt``) where the videos of the cameras
 are synchronized, one per video track, and the sound is mixed on audio tracks.
 One camera is the *reference* (``"L"``, matched by `reference` — the Lumix by
-default), the other one is ``"A"`` (Andrea's camera). From it, this module:
+default); other sources are recognized by their file names (`others`, by default
+``"W"`` for WhatsApp videos), and any other file is ``"A"`` (Andrea's camera).
+From it, this module:
 
 - reads where each source file sits on the timeline (:class:`SyncProject`);
 - corrects the synchronization to the frame from the soundtracks
@@ -33,6 +35,9 @@ from pathlib import Path
 import numpy as np
 
 LUMIX = r"_P\d{7}\.MP4$"
+OTHERS = {
+    "W": r"-WA\d{4}"
+}  # extra sources: label -> file name pattern (WhatsApp videos)
 
 
 class MltClock:
@@ -96,7 +101,10 @@ class SyncProject:
         Path to the ``.mlt`` project.
     reference : str
         Regular expression matching the file names of the reference camera
-        (``"L"``); the other camera is ``"A"``.
+        (``"L"``).
+    others : dict[str, str]
+        Label -> regular expression of the file names of other sources (``"W"``:
+        WhatsApp videos); any other file is camera ``"A"``.
 
     Attributes
     ----------
@@ -112,16 +120,22 @@ class SyncProject:
         Length of the project, in frames.
     """
 
-    def __init__(self, path: str | os.PathLike, reference: str = LUMIX):
+    def __init__(
+        self,
+        path: str | os.PathLike,
+        reference: str = LUMIX,
+        others: dict[str, str] = OTHERS,
+    ):
         self.path = Path(path)
         self.dir = self.path.parent
         self.reference = re.compile(reference, re.I)
+        self.others = {k: re.compile(v, re.I) for k, v in others.items()}
         self.tree = ET.parse(self.path)
         root = self.tree.getroot()
         self.clock = _clock_of(root)
         self.fps = self.clock.fps
         self.chains = {c.get("id"): c for c in root if c.tag in ("chain", "producer")}
-        self.segments = {"L": [], "A": []}
+        self.segments = {"L": [], "A": [], **{k: [] for k in self.others}}
         self.end = 0
         for pl in root.iter("playlist"):
             if _prop(pl, "shotcut:name") is None:
@@ -142,8 +156,12 @@ class SyncProject:
             self.end = max(self.end, pos)
 
     def camera(self, resource: str) -> str:
-        """``"L"`` for a file of the reference camera, else ``"A"``."""
-        return "L" if self.reference.search(resource or "") else "A"
+        """Label of the source of a file: ``"L"`` (reference), a key of `others`, else ``"A"``."""
+        if self.reference.search(resource or ""):
+            return "L"
+        return next(
+            (k for k, r in self.others.items() if r.search(resource or "")), "A"
+        )
 
     def resource(self, chain_id: str) -> str:
         """File (``resource``) of a chain."""
@@ -693,10 +711,11 @@ def build_montage(
         for x, y in zip(pts, pts[1:]):
             if films(cam, x, y):
                 segs.append([x, y, cam, zoom])
-            else:
-                other = "L" if cam == "A" else "A"
-                # no camera at all (e.g. the first frames before a source): left black
-                segs.append([x, y, other if films(other, x, y) else None, None])
+            else:  # the first other source that may be shown, else black (camera None)
+                other = next(
+                    (c for c in P.segments if c != cam and films(c, x, y)), None
+                )
+                segs.append([x, y, other, None])
     # First glue back the pieces of a same shot (split at the borders of files or of `blocked`
     # intervals), so that a piece is not mistaken for a short shot and absorbed.
     glued = []
@@ -771,23 +790,20 @@ def build_montage(
 
     # Frozen list: chain_for inserts zoom chains in the root, which would derail a live iterator.
     for pl in [pl for pl in root.iter("playlist") if _prop(pl, "shotcut:video") == "1"]:
-        cam = (
-            "L"
-            if any(
-                P.camera(P.resource(e.get("producer"))) == "L"
-                for e in pl.findall("entry")
-            )
-            else "A"
-        )
+        entries = pl.findall("entry")
+        if not entries:
+            continue
+        cam = P.camera(P.resource(entries[0].get("producer")))
         items = []
         if cam == "L":
-            # The reference camera lies under the other one: plain wherever a camera is shown (so that
-            # the cuts of the other camera need no cut here), zoomed where chosen zoomed, and absent
-            # where no camera may be shown (black).
+            # The reference camera lies under camera A: plain wherever L or A is shown (so that the
+            # cuts of A need no cut here), zoomed where chosen zoomed, and absent elsewhere: where no
+            # camera may be shown (black), and under other sources (e.g. a vertical phone video,
+            # shown with black bars rather than over the reference).
             for s, e, cid, t0 in P.segments["L"]:
                 for a, b, c, zoom in merged:
                     a, b = max(a, s), min(b, e, end)
-                    if b <= a or c is None:
+                    if b <= a or c not in ("L", "A"):
                         continue
                     z = zoom if c == "L" else None
                     if (
@@ -801,8 +817,8 @@ def build_montage(
                         items.append((a, b, cid, t0, z))
         else:
             for a, b, c, zoom in merged:
-                if c == "A":
-                    cid, t0 = P.covering("A", a, b)
+                if c == cam:
+                    cid, t0 = P.covering(cam, a, b)
                     items.append((a, b, cid, t0, zoom))
         fill(pl, items)
     if end < P.end:

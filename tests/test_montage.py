@@ -28,9 +28,11 @@ def make_sync_project(
     other_t0=0,
     other_len=55.0,
     fade=3.0,
+    phone=None,
 ):
     """A synchronization project as Shotcut writes it: V1 = reference camera (starting at `ref_start`),
-    V2 = the other camera, an audio track going from the other camera to the reference with a cross-fade."""
+    V2 = the other camera, an audio track going from the other camera to the reference with a cross-fade;
+    `phone` = (start_s, length_s): a WhatsApp video on V3."""
     rs, rl, ol, fd = (
         round(ref_start * FPS),
         round(ref_len * FPS),
@@ -49,6 +51,17 @@ def make_sync_project(
             f'<property name="shotcut:caption">{res}</property></chain>'
         )
 
+    phone_xml = phone_track = ""
+    if phone:
+        ps, pn = round(phone[0] * FPS), round(phone[1] * FPS)
+        phone_xml = (
+            chain("chainW", "z-WA0001.mp4", pn, True)
+            + '<playlist id="playlistW"><property name="shotcut:video">1</property>'
+            + '<property name="shotcut:name">V3</property>'
+            + f'<blank length="{C.string(ps)}"/>'
+            + f'<entry producer="chainW" in="{C.string(0)}" out="{C.string(pn - 1)}"/></playlist>'
+        )
+        phone_track = '<track producer="playlistW"/>'
     xml = f"""<?xml version="1.0" standalone="no"?>
 <mlt LC_NUMERIC="C" version="7.5.0" producer="main_bin">
   <profile description="automatic" width="1920" height="1080" progressive="1" frame_rate_num="60000" frame_rate_den="1001"/>
@@ -77,8 +90,9 @@ def make_sync_project(
     <filter id="filter0"><property name="mlt_service">panner</property></filter></playlist>
   <playlist id="playlist3"><property name="shotcut:audio">1</property><property name="shotcut:name">Son gauche</property>
     <entry producer="chain2" in="{C.string(-other_t0)}" out="{C.string(ol - 1)}"/></playlist>
+  {phone_xml}
   <tractor id="tractor1" in="{C.string(0)}" out="{C.string(end - 1)}"><property name="shotcut">1</property>
-    <track producer="background"/><track producer="playlist0"/><track producer="playlist1"/>
+    <track producer="background"/><track producer="playlist0"/><track producer="playlist1"/>{phone_track}
     <track producer="playlist2" hide="video"/><track producer="playlist3" hide="video"/></tractor>
 </mlt>
 """
@@ -200,6 +214,29 @@ def test_single_audio_not_longer_than_project(tmp_path):
     write_wav(tmp_path / "long.wav", np.zeros((45 * 1000, 2)), 1000)
     use_single_audio(m, tmp_path / "f.mlt", "long.wav")
     assert SyncProject(tmp_path / "f.mlt").end == round(40 * FPS)
+
+
+def test_build_montage_phone(tmp_path):
+    # a third source (WhatsApp video, "W") from 20 to 35 s, on its own track
+    P = SyncProject(make_sync_project(tmp_path / "p.mlt", phone=(20.0, 15.0)))
+    assert P.segments["W"] == [
+        (round(20 * FPS), round(35 * FPS), "chainW", round(20 * FPS))
+    ]
+    shots = [(0, "A"), (10, "W"), (24, "W"), (30, "L"), (40, "W")]
+    segs = build_montage(P, shots, {}, [], tmp_path / "m.mlt")
+    f = round
+    assert [
+        f(10 * FPS),
+        f(20 * FPS),
+        "L",
+        None,
+    ] in segs  # the phone does not film yet: the reference
+    assert [f(20 * FPS), f(30 * FPS), "W", None] in segs
+    assert segs[-1][2] == "L"  # after the phone stops (35 s): the reference
+    M = SyncProject(tmp_path / "m.mlt")
+    assert [(s, e) for s, e, _, _ in M.segments["W"]] == [(f(20 * FPS), f(30 * FPS))]
+    # no reference under the (vertical) phone video: black bars rather than the other camera around it
+    assert all(e <= f(20 * FPS) or s >= f(30 * FPS) for s, e, _, _ in M.segments["L"])
 
 
 def test_trim_end_refuses_cross_fade(tmp_path):

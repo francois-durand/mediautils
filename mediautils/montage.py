@@ -581,15 +581,16 @@ def build_montage(
     min_shot: float = 2.5,
     overwrite: bool = False,
     trim_audio: bool = True,
+    blocked: dict[str, list[tuple[float, float | None]]] | None = None,
 ) -> list[list]:
     """Write a montage of a synchronization project: cuts between cameras and fixed zooms.
 
     Only the video tracks change. The reference camera (``"L"``) stays all along on
     its track, split where it is zoomed; the other camera (``"A"``, on the track
     above) is shown where the montage chooses it, blanks elsewhere. Cuts are moved
-    to the nearest beat. A shot on a camera that does not film at that moment
-    falls back on the other camera; shots shorter than `min_shot` are absorbed by
-    a neighbour.
+    to the nearest beat. A shot on a camera that does not film at that moment (or
+    is `blocked`) falls back on the other camera; shots shorter than `min_shot`
+    are absorbed by a neighbour.
 
     Parameters
     ----------
@@ -614,6 +615,9 @@ def build_montage(
     trim_audio : bool
         With `cut_end`, also cut the audio tracks (set to ``False`` when they are
         about to be replaced by :func:`use_single_audio`).
+    blocked : dict[str, list[tuple[float, float | None]]] | None
+        Camera -> ``[(start_s, end_s)]`` where it must not be shown (someone walks
+        in front of it...); ``end_s = None``: until the end.
 
     Returns
     -------
@@ -632,6 +636,22 @@ def build_montage(
             return float(bt[np.argmin(np.abs(bt - t))])
         return t
 
+    hidden = {
+        cam: [
+            (round(a * P.fps), end if b is None else round(b * P.fps)) for a, b in ivs
+        ]
+        for cam, ivs in (blocked or {}).items()
+    }
+
+    def films(cam, a, b):
+        """Whether `cam` films frames [a, b) and may be shown there."""
+        return P.covering(cam, a, b) is not None and not any(
+            a < hb and ha < b for ha, hb in hidden.get(cam, [])
+        )
+
+    borders = set(P.borders()) | {
+        x for ivs in hidden.values() for iv in ivs for x in iv
+    }
     cuts = [(round(snap(t) * P.fps) if t > 0 else 0, s) for t, s in shots]
     segs = []
     for k, (a, s) in enumerate(cuts):
@@ -639,13 +659,13 @@ def build_montage(
         if b <= a:
             continue
         cam, zoom = (zooms[s][0], s) if s in zooms else (s, None)
-        pts = sorted({a, b} | {x for x in P.borders() if a < x < b})
+        pts = sorted({a, b} | {x for x in borders if a < x < b})
         for x, y in zip(pts, pts[1:]):
-            if P.covering(cam, x, y):
+            if films(cam, x, y):
                 segs.append([x, y, cam, zoom])
             else:
                 other = "L" if cam == "A" else "A"
-                if not P.covering(other, x, y):
+                if not films(other, x, y):
                     raise ValueError(f"no camera films frames {x}-{y}")
                 segs.append([x, y, other, None])
     merged = []
@@ -655,7 +675,7 @@ def build_montage(
         elif (
             merged
             and seg[1] - seg[0] < min_shot * P.fps
-            and P.covering(merged[-1][2], merged[-1][0], seg[1])
+            and films(merged[-1][2], merged[-1][0], seg[1])
         ):
             merged[-1][1] = seg[1]
         else:
@@ -667,15 +687,11 @@ def build_montage(
     ):  # a short shot the previous one could not absorb goes to the next one,
         a, b = merged[k][:2]  # or else lengthens at the expense of the next one
         nxt = merged[k + 1]
-        if b - a < ms and P.covering(nxt[2], a, nxt[1]):
+        if b - a < ms and films(nxt[2], a, nxt[1]):
             nxt[0] = a
             del merged[k]
             continue
-        if (
-            b - a < ms
-            and P.covering(merged[k][2], a, a + ms)
-            and nxt[1] - (a + ms) >= ms
-        ):
+        if b - a < ms and films(merged[k][2], a, a + ms) and nxt[1] - (a + ms) >= ms:
             merged[k][1] = nxt[0] = a + ms
         k += 1
 

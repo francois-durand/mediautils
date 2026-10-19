@@ -149,6 +149,35 @@ def test_build_montage_and_audio(tmp_path):
     assert SyncProject(final).end == round(40 * FPS)
 
 
+def test_build_montage_blocked(tmp_path):
+    P = SyncProject(make_sync_project(tmp_path / "p.mlt"))
+    zooms = {"zL": ("L", 960, 540, 2.0)}
+    shots = nervous_shots([(0, 62, ["zL", "A"])])
+    segs = build_montage(
+        P,
+        shots,
+        zooms,
+        [],
+        tmp_path / "m.mlt",
+        blocked={"L": [(20, 30)], "A": [(40, None)]},
+    )
+    for a, b, cam, _ in segs:
+        if cam == "L":  # someone in front of L from 20 to 30 s
+            assert b <= round(20 * FPS) or round(30 * FPS) <= a
+        else:  # and in front of A from 40 s to the end
+            assert b <= round(40 * FPS)
+    assert {cam for _, _, cam, _ in segs} == {"A", "L"}
+    with pytest.raises(ValueError):  # nobody films 55-62 s if L is blocked too
+        build_montage(
+            P,
+            shots,
+            zooms,
+            [],
+            tmp_path / "n.mlt",
+            blocked={"L": [(50, None)], "A": [(40, None)]},
+        )
+
+
 def test_trim_end_refuses_cross_fade(tmp_path):
     p = make_sync_project(tmp_path / "p.mlt")
     with pytest.raises(ValueError):

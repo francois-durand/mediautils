@@ -596,11 +596,27 @@ def nervous_shots(
     return shots
 
 
-def _affine(fid, cx, cy, z):
-    """Shotcut "Size, Position & Rotate" filter: fixed zoom `z` centred on (cx, cy) of a 1920x1080 frame."""
+def _rect(cx, cy, z):
+    """``transition.rect`` of a zoom `z` centred on (cx, cy) of a 1920x1080 frame."""
     w, h = 1920 / z, 1080 / z
     x0 = min(max(cx - w / 2, 0), 1920 - w)
     y0 = min(max(cy - h / 2, 0), 1080 - h)
+    return f"{-x0 * z:.1f} {-y0 * z:.1f} {1920 * z:.1f} {1080 * z:.1f} 1"
+
+
+def _affine(fid, cx, cy, z, z_start=None, frames=0):
+    """Shotcut "Size, Position & Rotate" filter: zoom `z` centred on (cx, cy) of a 1920x1080 frame.
+
+    With `z_start`, a progressive zoom from `z_start` to `z` over `frames` frames (linear keyframes).
+
+    >>> _affine("f", 960, 540, 2.0).find("property[@name='transition.rect']").text
+    '-960.0 -540.0 3840.0 2160.0 1'
+    >>> _affine("f", 960, 540, 2.0, 1.0, 100).find("property[@name='transition.rect']").text
+    '0=-0.0 -0.0 1920.0 1080.0 1;99=-960.0 -540.0 3840.0 2160.0 1'
+    """
+    rect = _rect(cx, cy, z)
+    if z_start is not None and frames > 1:
+        rect = f"0={_rect(cx, cy, z_start)};{frames - 1}={rect}"
     filt = ET.Element("filter", id=fid)
     for k, v in [
         ("background", "color:#00000000"),
@@ -608,10 +624,7 @@ def _affine(fid, cx, cy, z):
         ("shotcut:filter", "affineSizePosition"),
         ("transition.fill", "1"),
         ("transition.distort", "0"),
-        (
-            "transition.rect",
-            f"{-x0 * z:.1f} {-y0 * z:.1f} {1920 * z:.1f} {1080 * z:.1f} 1",
-        ),
+        ("transition.rect", rect),
         ("transition.valign", "middle"),
         ("transition.halign", "center"),
         ("shotcut:animIn", "00:00:00.000"),
@@ -653,7 +666,8 @@ def build_montage(
         (e.g. from :func:`nervous_shots`).
     zooms : dict[str, tuple[str, float, float, float]]
         Name -> ``(camera, centre_x, centre_y, factor)``, in pixels of the
-        1920x1080 source.
+        1920x1080 source; ``(camera, centre_x, centre_y, factor, start_factor)``
+        for a progressive zoom from `start_factor` to `factor` over the shot.
     beats : array-like
         Beat times (seconds), e.g. from :func:`timeline_beats`.
     dst : str | os.PathLike
@@ -774,8 +788,8 @@ def build_montage(
         n_zoom += 1
         c = copy.deepcopy(chains[cid])
         c.set("id", f"montage_zoom{n_zoom}")
-        _, cx, cy, z = zooms[zoom]
-        filt = _affine(f"montage_affine{n_zoom}", cx, cy, z)
+        _, cx, cy, z, *z_start = zooms[zoom]
+        filt = _affine(f"montage_affine{n_zoom}", cx, cy, z, *z_start, frames=b - a)
         filt.set("in", C.string(a))
         filt.set("out", C.string(b))
         c.append(filt)

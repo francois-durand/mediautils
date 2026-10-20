@@ -56,3 +56,10 @@ def test_mix_two_cameras(tmp_path):
     assert ysr == sr and y.shape == (round(P.video_end / FPS * sr), 2)
     with pytest.raises(FileExistsError):
         mix_two_cameras(P, tmp_path / "mix.wav")
+    # the reference camera alone: its own sound, at the target loudness, from where it starts
+    ref = [r for r in P.rushes() if "P1000001" in r[0]]
+    P.rushes = lambda: ref
+    out = mix_two_cameras(P, tmp_path / "solo.wav", target_lufs=-20)
+    assert out["camera_changes"] == [] and abs(out["lufs"] + 20) < 0.5
+    y, _ = sf.read(tmp_path / "solo.wav")
+    assert np.abs(y[: round(0.9 * sr)]).max() == 0 and np.abs(y[2 * sr :]).max() > 0

@@ -263,6 +263,8 @@ def mix_two_cameras(
 ) -> dict:
     """Write the sound of a song from the denoised soundtracks of the two cameras.
 
+    With the reference camera only (no ``"A"`` rush), its own stereo sound, at the target loudness.
+
     Parameters
     ----------
     project : mediautils.montage.SyncProject
@@ -321,6 +323,9 @@ def mix_two_cameras(
             y0, p0 = tracks[cam]
             y, present = np.where(p0[:, None], y0, y), p0 | present
         tracks[cam] = (y, present)
+    t = np.arange(n) / SR
+    if "A" not in tracks:  # a single camera (the Lumix): its own stereo sound
+        return _finish(tracks["L"][0], t, [], target_lufs, fade_in_at, dst)
     (A, pA), (L, pL) = tracks["A"], tracks["L"]
     A = np.repeat(A.mean(axis=1, keepdims=True), 2, axis=1)  # camera A records mono
     both = pA & pL
@@ -338,7 +343,6 @@ def mix_two_cameras(
     lb = loudness(blend[both])
     A1 *= 10 ** ((lb - loudness(A1[both])) / 20)
     L1 *= 10 ** ((lb - loudness(L1[both])) / 20)
-    t = np.arange(n) / SR
     w = both.astype(float)
     single = np.where((pA & ~pL)[:, None], A1, L1)
     edges = np.flatnonzero(np.diff(both.astype(int)))
@@ -358,7 +362,15 @@ def mix_two_cameras(
             w[m] = np.minimum(w[m], (te - t[m]) / ramp_out)
             single[m] = A1[m] if pA[e + 1] else L1[m]
     out = w[:, None] * blend + (1 - w[:, None]) * single
-    part = np.ones(n, bool)
+    return _finish(out, t, edges, target_lufs, fade_in_at, dst)
+
+
+def _finish(out, t, edges, target_lufs, fade_in_at, dst):
+    """Fade-in, loudness, peak limit, write; the summary returned by :func:`mix_two_cameras`."""
+    import soundfile as sf
+
+    out = np.array(out, dtype=float)
+    part = np.ones(len(t), bool)
     if fade_in_at is not None:
         a, d = fade_in_at
         out *= np.clip((t - a) / d, 0, 1)[:, None]

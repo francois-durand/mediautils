@@ -9,7 +9,7 @@ and seen. This module reads a montage project (``.mlt``, e.g. from
 - compares every cut with the nearest entry of the singer in the vocals stem, and
   flags the shots where he sings while not framed (:func:`vocal_entries`,
   :func:`audit_cuts`);
-- renders three pictures per shot (start, middle, end) on contact sheets, to look for
+- shows three pictures per shot (start, middle, end) on contact sheets, to look for
   cut heads, people hidden or cut by the frame, spectators in front of the camera
   (:func:`audit_frames`).
 """
@@ -22,8 +22,6 @@ from pathlib import Path
 import numpy as np
 
 from mediautils.montage import SyncProject, _clock_of, _prop
-
-MELT = r"C:\Program Files\Shotcut\melt.exe"
 
 
 def montage_shots(montage: str | os.PathLike) -> list[tuple[float, float, str]]:
@@ -44,12 +42,25 @@ def montage_shots(montage: str | os.PathLike) -> list[tuple[float, float, str]]:
     list[tuple[float, float, str]]
         The shots, in order.
     """
+    C, pieces = _visible(montage)
+    shots = []
+    for a, b, label, *_ in pieces:
+        if shots and shots[-1][2] == label and shots[-1][1] == a:
+            shots[-1] = (shots[-1][0], b, label)
+        else:
+            shots.append((a, b, label))
+    return [(a / C.fps, b / C.fps, lab) for a, b, lab in shots]
+
+
+def _visible(montage):
+    """What is seen on the timeline: ``(clock, [(a, b, label, chain, in, pos)])`` in frames, where a clip of
+    `chain` placed at `pos` with in-point `in` is the top visible clip on [a, b) (``chain=None``: black)."""
     P = SyncProject(montage)
     root = ET.parse(montage).getroot()
     C = _clock_of(root)
     by_id = {el.get("id"): el for el in root}
     main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")
-    tracks = []  # bottom to top: list of (start, end, label)
+    tracks = []  # bottom to top: list of (start, end, label, chain, in, pos)
     for tr in main.findall("track"):
         pl = by_id.get(tr.get("producer"))
         if pl is None or pl.tag != "playlist" or _prop(pl, "shotcut:video") != "1":
@@ -61,28 +72,51 @@ def montage_shots(montage: str | os.PathLike) -> list[tuple[float, float, str]]:
             if el.tag == "blank":
                 pos += C.frames(el.get("length"))
             elif el.tag == "entry":
-                n = C.frames(el.get("out")) - C.frames(el.get("in")) + 1
+                i0 = C.frames(el.get("in"))
+                n = C.frames(el.get("out")) - i0 + 1
                 chain = by_id[el.get("producer")]
                 label = _prop(chain, "montage:shot") or P.camera(
                     _prop(chain, "resource") or ""
                 )
-                items.append((pos, pos + n, label))
+                items.append((pos, pos + n, label, chain, i0, pos))
                 pos += n
         tracks.append(items)
-    cuts = sorted({x for items in tracks for a, b, _ in items for x in (a, b)})
-    shots = []
+    cuts = sorted({x for items in tracks for it in items for x in it[:2]})
+    pieces = []
     for a, b in zip(cuts, cuts[1:]):
-        label = "black"
+        hit = None
         for items in reversed(tracks):
-            hit = next((lab for s, e, lab in items if s <= a < e), None)
+            hit = next((it for it in items if it[0] <= a < it[1]), None)
             if hit is not None:
-                label = hit
                 break
-        if shots and shots[-1][2] == label and shots[-1][1] == a:
-            shots[-1] = (shots[-1][0], b, label)
-        else:
-            shots.append((a, b, label))
-    return [(a / C.fps, b / C.fps, lab) for a, b, lab in shots]
+        pieces.append((a, b, *hit[2:]) if hit else (a, b, "black", None, 0, 0))
+    return C, pieces
+
+
+def _crop(chain, k, C):
+    """ffmpeg crop of the Shotcut "Size, Position & Rotate" filter of `chain` at frame `k` of the source."""
+    filt = next(
+        (f for f in chain.findall("filter") if _prop(f, "mlt_service") == "affine"),
+        None,
+    )
+    if filt is None:
+        return "null"
+    k -= (
+        C.frames(filt.get("in")) if filt.get("in") else 0
+    )  # keyframes count from the filter's in-point
+    rect = _prop(filt, "transition.rect")
+    if "=" in rect:  # keyframes "f0=x y w h o;f1=..." : linear interpolation
+        keys = [
+            (int(a), [float(v) for v in r.split()])
+            for a, r in (p.split("=") for p in rect.split(";"))
+        ]
+        (k0, r0), (k1, r1) = keys[0], keys[-1]
+        u = min(max((k - k0) / max(k1 - k0, 1), 0), 1)
+        x, y, w, h = [a + (b - a) * u for a, b in zip(r0[:4], r1[:4])]
+    else:
+        x, y, w, h = [float(v) for v in rect.split()[:4]]
+    z = w / 1920
+    return f"crop={1920 / z:.0f}:{1080 / z:.0f}:{-x / z:.0f}:{-y / z:.0f}"
 
 
 def vocal_entries(
@@ -216,14 +250,16 @@ def _stack(files, dst, how):
 def audit_frames(
     montage: str | os.PathLike,
     dst: str | os.PathLike,
-    melt: str | os.PathLike = MELT,
     per_sheet: int = 8,
     width: int = 320,
 ) -> list[tuple[Path, list[tuple[float, float, str]]]]:
-    """Three pictures per shot (start + 0.15 s, middle, end - 0.15 s), rendered by melt, on sheets.
+    """Three pictures per shot (start + 0.15 s, middle, end - 0.15 s), on sheets.
 
-    Each sheet has one row per shot. Look at them for heads cut by the frame, people
-    hidden (behind the singer...) or cut at the edge, spectators in front of the camera.
+    Each picture is read from the source file of the visible clip and cropped as its
+    zoom (the Shotcut "Size, Position & Rotate" filter, keyframes interpolated), with
+    ffmpeg: much faster than rendering the project. Each sheet has one row per shot.
+    Look at them for heads cut by the frame, people hidden (behind the singer...) or
+    cut at the edge, spectators in front of the camera.
 
     Parameters
     ----------
@@ -231,8 +267,6 @@ def audit_frames(
         The montage project.
     dst : str | os.PathLike
         Folder of the pictures and sheets (created).
-    melt : str | os.PathLike
-        Shotcut's engine.
     per_sheet : int
         Shots per sheet.
     width : int
@@ -245,35 +279,49 @@ def audit_frames(
     """
     montage, dst = Path(montage).resolve(), Path(dst)
     dst.mkdir(parents=True, exist_ok=True)
-    C = SyncProject(montage).clock
+    C, pieces = _visible(montage)
     shots = montage_shots(montage)
+    height = width * 9 // 16
+    fit = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+    )
     strips = []
     for k, (a, b, _) in enumerate(shots):
         pics = []
         for j, t in enumerate([a + 0.15, (a + b) / 2, b - 0.15]):
-            f = (dst / f"shot{k:03d}_{j}.png").resolve()
+            f = dst / f"shot{k:03d}_{j}.png"
             n = int(round(t * C.fps))
+            a_, b_, _, chain, i0, pos = next(
+                (p for p in pieces if p[0] <= n < p[1]), pieces[-1]
+            )
+            if chain is None:
+                cmd = ["-f", "lavfi", "-i", f"color=black:s={width}x{height}"]
+                vf = "null"
+            else:
+                src = montage.parent / _prop(chain, "resource")
+                k_src = n - pos + i0  # frame of the source
+                cmd = ["-ss", f"{k_src / C.fps:.3f}", "-i", str(src)]
+                vf = f"{_crop(chain, k_src, C)},{fit}"
             subprocess.run(
                 [
-                    str(melt),
-                    "-silent",
-                    montage.name,
-                    f"in={n}",
-                    f"out={n}",
-                    "-consumer",
-                    f"avformat:{f}",
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-y",
+                    *cmd,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    vf,
+                    str(f),
                 ],
-                cwd=montage.parent,
                 check=True,
-                capture_output=True,
             )
             pics.append(f)
         strip = dst / f"shot{k:03d}.png"
         inp = sum([["-i", str(f)] for f in pics], [])
-        fc = (
-            "".join(f"[{i}]scale={width}:-2[s{i}];" for i in range(3))
-            + "[s0][s1][s2]hstack=inputs=3"
-        )
+        fc = "[0][1][2]hstack=inputs=3"
         subprocess.run(
             ["ffmpeg", "-v", "error", "-y", *inp, "-filter_complex", fc, str(strip)],
             check=True,

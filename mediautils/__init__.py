@@ -6,6 +6,10 @@ from mediautils.audiosync import audio_offset as audio_offset
 from mediautils.audiosync import read_audio as read_audio
 from mediautils.audiosync import sync_videos as sync_videos
 from mediautils.audiosync import SyncResult as SyncResult
+from mediautils.audit import audit_cuts as audit_cuts
+from mediautils.audit import audit_frames as audit_frames
+from mediautils.audit import montage_shots as montage_shots
+from mediautils.audit import vocal_entries as vocal_entries
 from mediautils.livesound import denoise_rushes as denoise_rushes
 from mediautils.livesound import loudness as loudness
 from mediautils.livesound import match_eq as match_eq

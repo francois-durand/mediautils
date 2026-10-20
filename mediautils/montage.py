@@ -788,6 +788,9 @@ def build_montage(
         n_zoom += 1
         c = copy.deepcopy(chains[cid])
         c.set("id", f"montage_zoom{n_zoom}")
+        ET.SubElement(
+            c, "property", name="montage:shot"
+        ).text = zoom  # read by mediautils.audit
         _, cx, cy, z, *z_start = zooms[zoom]
         filt = _affine(f"montage_affine{n_zoom}", cx, cy, z, *z_start, frames=b - a)
         filt.set("in", C.string(a))

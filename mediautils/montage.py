@@ -1011,6 +1011,8 @@ def use_single_audio(
     root = tree.getroot()
     C = _clock_of(root)
     audio = [pl for pl in root.iter("playlist") if _prop(pl, "shotcut:audio") == "1"]
+    if not audio:  # sound only on the video tracks (a single camera): mute them, add an audio track
+        audio = [_add_audio_track(root)]
     removed = set()
     for pl in audio:
         for el in list(pl):
@@ -1027,6 +1029,10 @@ def use_single_audio(
         template = template or copy.deepcopy(c)
         if f'producer="{c.get("id")}"' not in text:
             root.remove(c)
+    if (
+        template is None and not removed
+    ):  # no audio clip at all: a chain of a video track as model
+        template = next((copy.deepcopy(c) for c in root if c.tag == "chain"), None)
     if template is None:
         raise ValueError("no audio clip to replace")
     n = int(round(_duration(dst.parent / sound) * C.fps))
@@ -1062,6 +1068,32 @@ def use_single_audio(
     for pl in audio[1:]:
         pl.find("property[@name='shotcut:name']").text = "(vide)"
     _write(tree, dst)
+
+
+def _add_audio_track(root):
+    """Add an empty audio track to the main tractor; mute the sound of its video tracks."""
+    main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")
+    for tr in main.findall("track"):
+        pl = next((p for p in root if p.get("id") == tr.get("producer")), None)
+        if pl is not None and _prop(pl, "shotcut:video") == "1":
+            tr.set("hide", "audio")
+    pl = ET.Element("playlist", id="playlist_audio")
+    ET.SubElement(pl, "property", name="shotcut:audio").text = "1"
+    ET.SubElement(pl, "property", name="shotcut:name").text = "A1"
+    root.insert(list(root).index(main), pl)
+    tracks = main.findall("track")
+    tr = ET.Element("track", producer="playlist_audio", hide="video")
+    main.insert(list(main).index(tracks[-1]) + 1, tr)
+    mix = ET.SubElement(main, "transition", id="transition_audio")
+    for k, v in [
+        ("a_track", "0"),
+        ("b_track", str(len(tracks))),
+        ("mlt_service", "mix"),
+        ("always_active", "1"),
+        ("sum", "1"),
+    ]:
+        ET.SubElement(mix, "property", name=k).text = v
+    return pl
 
 
 def export_project(

@@ -1,5 +1,6 @@
 import shutil
 import wave
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
@@ -214,6 +215,50 @@ def test_single_audio_not_longer_than_project(tmp_path):
     write_wav(tmp_path / "long.wav", np.zeros((45 * 1000, 2)), 1000)
     use_single_audio(m, tmp_path / "f.mlt", "long.wav")
     assert SyncProject(tmp_path / "f.mlt").end == round(40 * FPS)
+
+
+SINGLE_CAMERA = """<?xml version="1.0" standalone="no"?>
+<mlt LC_NUMERIC="C" version="7.5.0" producer="main_bin">
+  <profile width="1920" height="1080" frame_rate_num="60000" frame_rate_den="1001"/>
+  <playlist id="main_bin"><property name="xml_retain">1</property></playlist>
+  <producer id="black" in="00:00:00.000" out="00:00:09.993">
+    <property name="length">00:00:10.010</property><property name="resource">0</property>
+    <property name="mlt_service">color</property>
+  </producer>
+  <playlist id="background"><entry producer="black" in="00:00:00.000" out="00:00:09.993"/></playlist>
+  <chain id="chain0" out="00:00:19.987">
+    <property name="length">00:00:20.003</property><property name="resource">x_P1000001.MP4</property>
+    <property name="mlt_service">avformat-novalidate</property>
+    <property name="audio_index">1</property><property name="video_index">0</property>
+  </chain>
+  <playlist id="playlist0">
+    <property name="shotcut:video">1</property><property name="shotcut:name">V1</property>
+    <entry producer="chain0" in="00:00:01.001" out="00:00:10.994"/>
+  </playlist>
+  <tractor id="tractor0" in="00:00:00.000" out="00:00:09.993">
+    <property name="shotcut">1</property>
+    <track producer="background"/><track producer="playlist0"/>
+  </tractor>
+</mlt>
+"""
+
+
+def test_single_audio_single_camera(tmp_path):
+    # a project whose only sound is that of the (single) camera on its video track
+    (tmp_path / "p.mlt").write_text(SINGLE_CAMERA, encoding="utf-8")
+    write_wav(tmp_path / "s.wav", np.zeros((12 * 1000, 2)), 1000)
+    use_single_audio(tmp_path / "p.mlt", tmp_path / "f.mlt", "s.wav")
+    root = ET.parse(tmp_path / "f.mlt").getroot()
+    main = root.find("tractor[@id='tractor0']")
+    hide = {t.get("producer"): t.get("hide") for t in main.findall("track")}
+    assert hide == {"background": None, "playlist0": "audio", "playlist_audio": "video"}
+    entry = root.find("playlist[@id='playlist_audio']/entry")
+    assert entry.get("producer") == "single_audio"
+    assert (
+        root.find("chain[@id='single_audio']/property[@name='video_index']").text
+        == "-1"
+    )
+    assert main.find("transition/property[@name='b_track']").text == "2"
 
 
 def test_build_montage_phone(tmp_path):

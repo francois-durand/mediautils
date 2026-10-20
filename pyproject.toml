@@ -32,6 +32,8 @@ concert = [
     "librosa>=0.10 ; python_version < '3.14'",
     "scipy>=1.11",
     "soundfile>=0.12",
+    # mediautils.audit.audit_headroom (face detection with the Haar cascades, not shipped any more by OpenCV 5)
+    "opencv-python-headless>=4.8,<5",
 ]
 
 [project.urls]

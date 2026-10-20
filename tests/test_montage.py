@@ -330,3 +330,20 @@ def test_resync_project(tmp_path):
     assert (
         t0 == s > 0
     )  # a blank before the other camera, which starts at its first frame
+
+
+def test_add_markers(tmp_path):
+    from mediautils import add_markers
+
+    p = make_sync_project(tmp_path / "p.mlt")
+    add_markers(p, [(0.0, "Intro"), (10.0, "Couplet 1")])
+    add_markers(p, [(20.0, "Refrain")])  # the markers already there are kept
+    main = ET.parse(p).getroot().find("tractor[@id='tractor1']")
+    marks = main.findall("properties[@name='shotcut:markers']/properties")
+    assert [m.find("property[@name='text']").text for m in marks] == [
+        "Intro",
+        "Couplet 1",
+        "Refrain",
+    ]
+    start = marks[1].find("property[@name='start']").text
+    assert C.frames(start) == round(10 * FPS)

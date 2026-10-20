@@ -95,12 +95,18 @@ def _visible(montage):
 
 def _crop(chain, k, C):
     """ffmpeg crop of the Shotcut "Size, Position & Rotate" filter of `chain` at frame `k` of the source."""
+    r = _crop_rect(chain, k, C)
+    return "null" if r is None else "crop={2:.0f}:{3:.0f}:{0:.0f}:{1:.0f}".format(*r)
+
+
+def _crop_rect(chain, k, C):
+    """Part of the 1920x1080 source shown by `chain` at its frame `k`: ``(x0, y0, w, h)``, or ``None`` (all)."""
     filt = next(
         (f for f in chain.findall("filter") if _prop(f, "mlt_service") == "affine"),
         None,
     )
     if filt is None:
-        return "null"
+        return None
     k -= (
         C.frames(filt.get("in")) if filt.get("in") else 0
     )  # keyframes count from the filter's in-point
@@ -116,7 +122,183 @@ def _crop(chain, k, C):
     else:
         x, y, w, h = [float(v) for v in rect.split()[:4]]
     z = w / 1920
-    return f"crop={1920 / z:.0f}:{1080 / z:.0f}:{-x / z:.0f}:{-y / z:.0f}"
+    return (-x / z, -y / z, 1920 / z, 1080 / z)
+
+
+def audit_headroom(
+    montage: str | os.PathLike,
+    step: float = 0.5,
+    top_margin: float = 0.05,
+    edge: float = 0.03,
+    around: float = 2.0,
+) -> list[dict]:
+    """Heads cut by the frame, and people cut at its edge, shot by shot, from the faces in the source.
+
+    Faces are looked for every `step` s in the whole source picture (OpenCV Haar
+    cascades, frontal and profile), so that a head the zoom cuts is still found, from
+    `around` s before to `around` s after the shot (its zoom is fixed: a face seen just
+    before the shot tells where the frame stands when the person looks down or away
+    during it). For a face whose center is in the zoom, the top of the head is taken a
+    third of a face above the face; the margin is its distance to the top edge of the
+    zoom, as a fraction of the zoom's height (negative: the head is cut).
+
+    A face looking down all along, or hidden by the microphone, may be missed: this
+    complements the sheets of :func:`audit_frames`, it does not replace looking at them.
+
+    Parameters
+    ----------
+    montage : str | os.PathLike
+        The montage project.
+    step : float
+        Time between two checks (seconds).
+    top_margin : float
+        Minimum margin above the heads.
+    edge : float
+        A face whose center is within this fraction of the zoom's width from its left or
+        right edge is "cut at the edge".
+    around : float
+        Seconds checked before and after each shot.
+
+    Returns
+    -------
+    list[dict]
+        One per shot with a problem: ``start``, ``end`` (s), ``framing``, ``margin`` (the
+        smallest margin above a head, or ``None``), ``issues`` (``"head"``, ``"edge"``).
+    """
+    import cv2
+
+    montage = Path(montage).resolve()
+    C, pieces = _visible(montage)
+    cascades = [
+        cv2.CascadeClassifier(cv2.data.haarcascades + name)
+        for name in ("haarcascade_frontalface_alt2.xml", "haarcascade_profileface.xml")
+    ]
+    shots = []  # pieces of a same clip glued back
+    for p in pieces:
+        if shots and shots[-1][3] is p[3] and shots[-1][1] == p[0]:
+            shots[-1] = (shots[-1][0], p[1], *shots[-1][2:])
+        else:
+            shots.append(p)
+    caps, rows = {}, []
+    stride = max(1, int(round(step * C.fps)))
+    pad = int(round(around * C.fps))
+    for a, b, label, chain, i0, pos in shots:
+        if chain is None:
+            continue
+        src = str(montage.parent / _prop(chain, "resource"))
+        cap = caps.setdefault(src, cv2.VideoCapture(src))
+        margin, issues = None, set()
+        for n in range(max(a - pad, pos), b + pad, stride):
+            k_src = n - pos + i0
+            cap.set(cv2.CAP_PROP_POS_FRAMES, k_src)
+            ok, img = cap.read()
+            if not ok:
+                continue
+            H, W = img.shape[:2]
+            gray = cv2.cvtColor(
+                cv2.resize(img, (960, int(960 * H / W))), cv2.COLOR_BGR2GRAY
+            )
+            f = W / 960  # detection picture -> source pixels
+            faces = []
+            for c in cascades:
+                faces += [
+                    tuple(v) for v in c.detectMultiScale(gray, 1.1, 5, minSize=(24, 24))
+                ]
+                if c is cascades[1]:  # profiles looking the other way
+                    flipped = c.detectMultiScale(
+                        cv2.flip(gray, 1), 1.1, 5, minSize=(24, 24)
+                    )
+                    faces += [(960 - x - w, y, w, h) for x, y, w, h in flipped]
+            # the zoom of the shot (fixed zooms; for a progressive one, its state at the nearest frame)
+            k_rect = min(max(n, a), b - 1) - pos + i0
+            x0, y0, cw, ch = _crop_rect(chain, k_rect, C) or (0, 0, W, H)
+            for x, y, w, h in faces:
+                x, y, w, h = x * f, y * f, w * f, h * f
+                cx = x + w / 2
+                if not x0 <= cx <= x0 + cw or y + h < y0:
+                    continue  # not in the shot (a face wholly above it is not one of its people)
+                m = (y - h / 3 - y0) / ch
+                margin = m if margin is None else min(margin, m)
+                if a <= n < b and (cx - x0 < edge * cw or x0 + cw - cx < edge * cw):
+                    issues.add("edge")
+        if margin is not None and margin < top_margin:
+            issues.add("head")
+        if issues:
+            rows.append(
+                {
+                    "start": a / C.fps,
+                    "end": b / C.fps,
+                    "framing": label,
+                    "margin": margin,
+                    "issues": sorted(issues),
+                }
+            )
+    for cap in caps.values():
+        cap.release()
+    return rows
+
+
+def zoom_heights(
+    source: str | os.PathLike,
+    zooms: dict[str, tuple],
+    start: float = 0.0,
+    end: float | None = None,
+    step: float = 1.0,
+    margin: float = 0.10,
+    camera: str = "L",
+    percentile: float = 2.0,
+) -> dict[str, float]:
+    """Largest ``centre_y`` of each zoom keeping `margin` of air above the heads, from the faces of the song.
+
+    Faces are detected every `step` s of `source` (seconds `start` to `end` of the file);
+    for each zoom of `camera` (``(camera, centre_x, centre_y, factor, ...)``, as for
+    :func:`~mediautils.montage.build_montage`), the highest heads whose centre is in its
+    width (`percentile` of the tops of head, a third of a face above the face) give the
+    largest ``centre_y`` that still leaves `margin` of the zoom's height above them. The
+    camera framing changes from song to song: compute it for each song. (Burlingue,
+    I don't need no doctor: 5 % and 8 % still left six shots with a head against the
+    edge, when the singer stood up straight.)
+
+    Returns
+    -------
+    dict[str, float]
+        Zoom name -> largest ``centre_y`` (zooms with no face in their width are left out).
+    """
+    import cv2
+
+    cascades = [
+        cv2.CascadeClassifier(cv2.data.haarcascades + name)
+        for name in ("haarcascade_frontalface_alt2.xml", "haarcascade_profileface.xml")
+    ]
+    cap = cv2.VideoCapture(str(source))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if end is None:
+        end = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps
+    faces = []
+    for t in np.arange(start, end, step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(t * fps))
+        ok, img = cap.read()
+        if not ok:
+            continue
+        f = img.shape[1] / 960
+        gray = cv2.cvtColor(
+            cv2.resize(img, (960, int(img.shape[0] / f))), cv2.COLOR_BGR2GRAY
+        )
+        for c in cascades:
+            for x, y, w, h in c.detectMultiScale(gray, 1.1, 5, minSize=(24, 24)):
+                faces.append(((x + w / 2) * f, (y - h / 3) * f))
+    cap.release()
+    faces = np.array(faces).reshape(-1, 2)
+    out = {}
+    for name, (cam, cx, cy, z, *_) in zooms.items():
+        if cam != camera:
+            continue
+        w, h = 1920 / z, 1080 / z
+        x0 = min(max(cx - w / 2, 0), 1920 - w)
+        tops = faces[(faces[:, 0] > x0 + 0.03 * w) & (faces[:, 0] < x0 + 0.97 * w), 1]
+        if len(tops):
+            out[name] = float(np.percentile(tops, percentile) - margin * h + h / 2)
+    return out
 
 
 def vocal_entries(

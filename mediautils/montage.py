@@ -1073,6 +1073,38 @@ def use_single_audio(
     _write(tree, dst)
 
 
+def add_markers(
+    path: str | os.PathLike, markers: list[tuple[float, str]], color: str = "#ffaa00"
+) -> None:
+    """Add Shotcut markers to a project (in place, for generated projects): ``(time_s, text)``.
+
+    E.g. one per section of the song (« Couplet 2 ») on its first beat, to navigate in
+    the project and see at a glance whether the bar grid fits the music. Existing
+    markers are kept.
+    """
+    path = Path(path)
+    tree = ET.parse(path)
+    root = tree.getroot()
+    C = _clock_of(root)
+    main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")
+    box = main.find("properties[@name='shotcut:markers']")
+    if box is None:
+        box = ET.Element("properties", name="shotcut:markers")
+        main.insert(len([e for e in main if e.tag == "property"]), box)
+    n = len(box.findall("properties"))
+    for k, (t, text) in enumerate(markers):
+        m = ET.SubElement(box, "properties", name=str(n + k))
+        frames = C.string(round(t * C.fps))
+        for name, value in [
+            ("text", text),
+            ("start", frames),
+            ("end", frames),
+            ("color", color),
+        ]:
+            ET.SubElement(m, "property", name=name).text = value
+    _write(tree, path)
+
+
 def _add_audio_track(root):
     """Add an empty audio track to the main tractor; mute the sound of its video tracks."""
     main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")

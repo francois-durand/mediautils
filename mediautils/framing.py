@@ -432,6 +432,7 @@ def framing_files(
     width: int = 1920,
     picture: np.ndarray | None = None,
     prefix: str | None = None,
+    time_last: bool = False,
     **kwargs,
 ) -> list[Path]:
     """One picture per framing, every interval and tight shot, to be checked one by one.
@@ -467,6 +468,9 @@ def framing_files(
         `time`, e.g. from :func:`stacked_exposure`.
     prefix : str, optional
         Start of the names instead of the time (e.g. ``"empilement"``).
+    time_last : bool
+        Names ``cour_01_Thomas_Mathieu_t0100.jpg``: with several times, the pictures of
+        a framing follow one another (Fanfan: 5 times, easier to judge).
     **kwargs
         Options of :func:`interval_framings`.
 
@@ -497,7 +501,8 @@ def framing_files(
     dst = Path(dst)
     dst.mkdir(parents=True, exist_ok=True)
     t = round(time if label_time is None else label_time)
-    stem = f"{prefix or f't{t // 60:02d}{t % 60:02d}'}_{side}"
+    when = prefix or f"t{t // 60:02d}{t % 60:02d}"
+    stem = f"{when}_{side}"
     out = []
     for k, (label, (_, cx, cy, z), problem) in enumerate(items, 1):
         w, h = W / z, H / z
@@ -533,7 +538,11 @@ def framing_files(
             cv2.line(pic, (0, 0), (width - 1, hh - 1), (0, 0, 255), int(8 * s))
             cv2.line(pic, (0, hh - 1), (width - 1, 0), (0, 0, 255), int(8 * s))
             write(problem, hh - 16 * s, (0, 0, 255))
-        path = dst / f"{stem}_{k:02d}_{label}.jpg"
+        path = dst / (
+            f"{side}_{k:02d}_{label}_{when}.jpg"
+            if time_last
+            else f"{stem}_{k:02d}_{label}.jpg"
+        )
         ok, buf = cv2.imencode(
             ".jpg", pic
         )  # imwrite cannot write non-ASCII paths on Windows

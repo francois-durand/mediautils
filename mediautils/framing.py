@@ -313,7 +313,9 @@ def _candidates(
                 zt = min(z * tight, max_zoom * tight)
                 while True:
                     h = H / zt
-                    y0 = min(max(p.eyes - min(eye_line, 0.28) * h, 0), H - h)
+                    # the singer's eyes higher still: less room above the head (Fanfan)
+                    e = min(eye_line, 0.28 if p.tight_hands else 0.24)
+                    y0 = min(max(p.eyes - e * h, 0), H - h)
                     low = p.bottom if p.alone is None else max(p.bottom, p.alone)
                     if not p.tight_hands:  # a singer: the tight shot is the head
                         low = p.eyes

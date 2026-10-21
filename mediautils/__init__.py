@@ -9,9 +9,9 @@ from mediautils.audiosync import SyncResult as SyncResult
 from mediautils.audit import audit_cuts as audit_cuts
 from mediautils.audit import audit_frames as audit_frames
 from mediautils.audit import audit_headroom as audit_headroom
+from mediautils.audit import fit_zooms as fit_zooms
 from mediautils.audit import montage_shots as montage_shots
 from mediautils.audit import vocal_entries as vocal_entries
-from mediautils.audit import zoom_heights as zoom_heights
 from mediautils.livesound import denoise_rushes as denoise_rushes
 from mediautils.livesound import loudness as loudness
 from mediautils.livesound import match_eq as match_eq

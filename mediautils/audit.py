@@ -128,9 +128,11 @@ def _crop_rect(chain, k, C):
 def audit_headroom(
     montage: str | os.PathLike,
     step: float = 0.5,
-    top_margin: float = 0.05,
+    top_margin: float = 0.02,
     edge: float = 0.03,
     around: float = 2.0,
+    subjects: dict[str, list[float]] | None = None,
+    reach: float = 220.0,
 ) -> list[dict]:
     """Heads cut by the frame, and people cut at its edge, shot by shot, from the faces in the source.
 
@@ -158,6 +160,12 @@ def audit_headroom(
         right edge is "cut at the edge".
     around : float
         Seconds checked before and after each shot.
+    subjects : dict[str, list[float]] | None
+        Framing -> x of the people it is about (as given to :func:`fit_zooms`): only their
+        heads count (faces within `reach` px). Without it, the people in the middle 70 %
+        of the zoom.
+    reach : float
+        See `subjects`.
 
     Returns
     -------
@@ -187,7 +195,7 @@ def audit_headroom(
             continue
         src = str(montage.parent / _prop(chain, "resource"))
         cap = caps.setdefault(src, cv2.VideoCapture(src))
-        margin, issues = None, set()
+        inside, outside, issues = [], [], set()
         for n in range(max(a - pad, pos), b + pad, stride):
             k_src = n - pos + i0
             cap.set(cv2.CAP_PROP_POS_FRAMES, k_src)
@@ -215,12 +223,25 @@ def audit_headroom(
             for x, y, w, h in faces:
                 x, y, w, h = x * f, y * f, w * f, h * f
                 cx = x + w / 2
-                if not x0 <= cx <= x0 + cw or y + h < y0:
-                    continue  # not in the shot (a face wholly above it is not one of its people)
+                # only the people the shot is about (its subjects, else the middle 70 % of the zoom): a
+                # close-up on someone may cut the neighbours (accepted by Fanfan); a face wholly above
+                # the zoom is not in it
+                xs = (subjects or {}).get(label)
+                about = (
+                    any(abs(cx - s) < reach for s in xs)
+                    if xs
+                    else abs(cx - (x0 + cw / 2)) <= 0.35 * cw
+                )
+                if not about or not x0 <= cx <= x0 + cw or y + h < y0:
+                    continue
                 m = (y - h / 3 - y0) / ch
-                margin = m if margin is None else min(margin, m)
+                (inside if a <= n < b else outside).append(m)
                 if a <= n < b and (cx - x0 < edge * cw or x0 + cw - cx < edge * cw):
                     issues.add("edge")
+        # the faces seen during the shot; those around it only if none was seen during it (a person
+        # looking down all along): around the shot, people stand up straighter than in it
+        seen = inside or outside
+        margin = min(seen) if seen else None
         if margin is not None and margin < top_margin:
             issues.add("head")
         if issues:
@@ -238,31 +259,29 @@ def audit_headroom(
     return rows
 
 
-def zoom_heights(
+def fit_zooms(
     source: str | os.PathLike,
-    zooms: dict[str, tuple],
+    framings: dict[str, tuple[str, list[float], float]],
     start: float = 0.0,
     end: float | None = None,
     step: float = 1.0,
-    margin: float = 0.10,
-    camera: str = "L",
+    target: float = 0.08,
     percentile: float = 2.0,
-) -> dict[str, float]:
-    """Largest ``centre_y`` of each zoom keeping `margin` of air above the heads, from the faces of the song.
+    reach: float = 220.0,
+    min_margin: float = 0.03,
+) -> dict[str, tuple[str, float, float, float]]:
+    """Zooms of a song fitted to where its people stand: ``name -> (camera, centre_x, centre_y, factor)``.
 
-    Faces are detected every `step` s of `source` (seconds `start` to `end` of the file);
-    for each zoom of `camera` (``(camera, centre_x, centre_y, factor, ...)``, as for
-    :func:`~mediautils.montage.build_montage`), the highest heads whose centre is in its
-    width (`percentile` of the tops of head, a third of a face above the face) give the
-    largest ``centre_y`` that still leaves `margin` of the zoom's height above them. The
-    camera framing changes from song to song: compute it for each song. (Burlingue,
-    I don't need no doctor: 5 % and 8 % still left six shots with a head against the
-    edge, when the singer stood up straight.)
+    Each framing is given by the people it shows, ``(camera, [x of each person], factor)``
+    (approximate x in the 1920-wide picture of `source`, the file of `camera`). The faces
+    detected every `step` s within `reach` px of each given x tell where the person really
+    stands: the zoom is centred on the median positions of its people, its height puts
+    the median top of their heads `target` of the zoom's height under its top edge,
+    unless that would leave less than `min_margin` above more than `percentile` % of
+    their heads. Other people may be
+    cut by a zoom (accepted: a close-up on someone cuts the neighbours).
 
-    Returns
-    -------
-    dict[str, float]
-        Zoom name -> largest ``centre_y`` (zooms with no face in their width are left out).
+    The framing of a camera changes from song to song: fit the zooms of each song.
     """
     import cv2
 
@@ -280,24 +299,28 @@ def zoom_heights(
         ok, img = cap.read()
         if not ok:
             continue
-        f = img.shape[1] / 960
+        f = 1920 / img.shape[1]  # to the 1920-wide coordinates of the zooms
+        g = img.shape[1] / 960
         gray = cv2.cvtColor(
-            cv2.resize(img, (960, int(img.shape[0] / f))), cv2.COLOR_BGR2GRAY
+            cv2.resize(img, (960, int(img.shape[0] / g))), cv2.COLOR_BGR2GRAY
         )
         for c in cascades:
             for x, y, w, h in c.detectMultiScale(gray, 1.1, 5, minSize=(24, 24)):
-                faces.append(((x + w / 2) * f, (y - h / 3) * f))
+                faces.append(((x + w / 2) * g * f, (y - h / 3) * g * f))
     cap.release()
     faces = np.array(faces).reshape(-1, 2)
     out = {}
-    for name, (cam, cx, cy, z, *_) in zooms.items():
-        if cam != camera:
-            continue
+    for name, (cam, xs, z) in framings.items():
         w, h = 1920 / z, 1080 / z
-        x0 = min(max(cx - w / 2, 0), 1920 - w)
-        tops = faces[(faces[:, 0] > x0 + 0.03 * w) & (faces[:, 0] < x0 + 0.97 * w), 1]
-        if len(tops):
-            out[name] = float(np.percentile(tops, percentile) - margin * h + h / 2)
+        people = [faces[abs(faces[:, 0] - x) < reach] for x in xs]
+        if any(len(p) == 0 for p in people):
+            continue
+        cx = float(np.mean([np.median(p[:, 0]) for p in people]))
+        best = min(np.median(p[:, 1]) for p in people) - target * h
+        safe = min(np.percentile(p[:, 1], percentile) for p in people) - min_margin * h
+        y0 = min(best, safe)
+        cy = float(min(max(y0 + h / 2, h / 2), 1080 - h / 2))
+        out[name] = (cam, float(min(max(cx, w / 2), 1920 - w / 2)), cy, z)
     return out
 
 

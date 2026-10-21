@@ -12,6 +12,7 @@ from mediautils.audit import audit_headroom as audit_headroom
 from mediautils.audit import fit_zooms as fit_zooms
 from mediautils.audit import montage_shots as montage_shots
 from mediautils.audit import vocal_entries as vocal_entries
+from mediautils.framing import framing_files as framing_files
 from mediautils.framing import framing_sheet as framing_sheet
 from mediautils.framing import interval_framings as interval_framings
 from mediautils.framing import Person as Person

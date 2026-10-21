@@ -182,6 +182,23 @@ def interval_framings(
             return "large"
         return names[i] if i == j else f"{names[i]}-{names[j]}"
 
+    frames, tights = _candidates(
+        people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
+    )
+    tights = {f"{names[i]} serré": f for i, f in tights.items()}
+    frames = [f[:5] for f in frames]
+    # a framing is named after the people it shows; two framings showing the same people at
+    # about the same zoom are one (the one computed for exactly those people is kept)
+    out, kept = {}, {}  # kept: name -> (shown, members, zoom)
+    return _merge(frames, tights, names, label, camera, out, kept)
+
+
+def _candidates(
+    people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
+):
+    """Every interval framing (shown, members, cx, cy, z) and tight shot {i: framing}."""
+    names = list(people)
+    ps = [people[n] for n in names]
     frames = []  # (shown, members, cx, cy, z)
     tights = {}
     for i in range(len(ps)):
@@ -214,15 +231,12 @@ def interval_framings(
                         break
                     zt *= 0.97
                 x = min(max((p.x0 + p.x1) / 2, W / zt / 2), W - W / zt / 2)
-                tights[f"{names[i]} serré"] = (
-                    camera,
-                    float(x),
-                    float(y0 + h / 2),
-                    float(zt),
-                )
-    # a framing is named after the people it shows; two framings showing the same people at
-    # about the same zoom are one (the one computed for exactly those people is kept)
-    out, kept = {}, {}  # kept: name -> (shown, members, zoom)
+                tights[i] = (camera, float(x), float(y0 + h / 2), float(zt))
+    return frames, tights
+
+
+def _merge(frames, tights, names, label, camera, out, kept):
+    """Name the framings after the people they show, merge the near-duplicates."""
 
     def twin(shown, z):
         return next(
@@ -359,3 +373,176 @@ def framing_sheet(
     dst = Path(dst)
     cv2.imwrite(str(dst), sheet)
     return dst
+
+
+def framing_files(
+    video: str | os.PathLike,
+    time: float,
+    people: dict[str, Person],
+    dst: str | os.PathLike,
+    side: str = "cour",
+    label_time: float | None = None,
+    width: int = 960,
+    **kwargs,
+) -> list[Path]:
+    """One picture per framing, every interval and tight shot, to be checked one by one.
+
+    The files are named ``t0100_cour_01_Thomas_Mathieu.jpg`` (time of the picture,
+    side of the camera, number, first and last person of the interval, or
+    ``Thomas_serré``), in the order of the axis: for each person, the intervals that
+    start with them from the largest, then the person alone and their tight shot. A
+    framing that does not work (it shows other people too, or it is almost another
+    one) is drawn anyway, crossed in red, with the reason.
+
+    Requires ffmpeg and OpenCV (extra ``concert``).
+
+    Parameters
+    ----------
+    video : str or os.PathLike
+        Source video (1920 x 1080).
+    time : float
+        Time of the picture in the video (s).
+    people : dict[str, Person]
+        As for :func:`interval_framings`.
+    dst : str or os.PathLike
+        Folder to write to (created if needed).
+    side : str
+        Side of the camera, for the names (``"cour"``, ``"jardin"``).
+    label_time : float, optional
+        Time written in the names (s), e.g. the time in the project rather than in the
+        video; default `time`.
+    width : int
+        Width of the pictures.
+    **kwargs
+        Options of :func:`interval_framings`.
+
+    Returns
+    -------
+    list[Path]
+        The pictures written.
+    """
+    import unicodedata
+
+    import cv2
+
+    camera = kwargs.pop("camera", "L")
+    opts = dict(
+        main=None,
+        margin=0.04,
+        eye_line=1 / 3,
+        tight=1.35,
+        tolerance=0.15,
+        no_tight=(),
+        max_zoom=2.4,
+    )
+    opts.update(kwargs)
+    final = interval_framings(people, camera=camera, **opts)
+    frames, tights = _candidates(people, camera, **opts)
+    names = list(people)
+    by_members = {f[1]: f for f in frames}
+    img = _picture(video, time)
+    dst = Path(dst)
+    dst.mkdir(parents=True, exist_ok=True)
+    t = round(time if label_time is None else label_time)
+    stem = f"t{t // 60:02d}{t % 60:02d}_{side}"
+
+    def nearest(f):
+        return max(final, key=lambda n: _overlap(f, final[n]))
+
+    items = []
+    for i in range(len(names)):
+        for j in range(len(names) - 1, i - 1, -1):
+            members = frozenset(range(i, j + 1))
+            shown, _, cx, cy, z = by_members[members]
+            f = (camera, cx, cy, z)
+            label = names[i] if i == j else f"{names[i]}_{names[j]}"
+            problem = ""
+            if shown != members:
+                problem = "montre aussi " + ", ".join(
+                    names[k] for k in sorted(shown - members)
+                )
+            n = nearest(f)
+            if not problem and _overlap(f, final[n]) < 0.98:
+                problem = f"presque le meme que {n}"
+            items.append((label, f, problem))
+        if i in tights:
+            n = f"{names[i]} serré"
+            problem = "" if n in final else f"presque le meme que {nearest(tights[i])}"
+            items.append((f"{names[i]}_serré", tights[i], problem))
+    out = []
+    for k, (label, (_, cx, cy, z), problem) in enumerate(items, 1):
+        w, h = W / z, H / z
+        x0, y0 = int(round(cx - w / 2)), int(round(cy - h / 2))
+        pic = cv2.resize(
+            img[max(y0, 0) : y0 + int(h), max(x0, 0) : x0 + int(w)],
+            (width, width * H // W),
+        )
+
+        def ascii_(s):  # OpenCV writes ASCII only
+            return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+
+        text = (
+            f"{label.replace('_serré', ' serré').replace('_', ' + ')}  (zoom {z:.2f})"
+        )
+        cv2.putText(
+            pic, ascii_(text), (10, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5
+        )
+        cv2.putText(
+            pic, ascii_(text), (10, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2
+        )
+        if problem:
+            hh = pic.shape[0]
+            cv2.line(pic, (0, 0), (width - 1, hh - 1), (0, 0, 255), 8)
+            cv2.line(pic, (0, hh - 1), (width - 1, 0), (0, 0, 255), 8)
+            cv2.putText(
+                pic,
+                ascii_(problem),
+                (10, hh - 16),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (0, 0, 0),
+                5,
+            )
+            cv2.putText(
+                pic,
+                ascii_(problem),
+                (10, hh - 16),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (0, 0, 255),
+                2,
+            )
+        path = dst / f"{stem}_{k:02d}_{label}.jpg"
+        ok, buf = cv2.imencode(
+            ".jpg", pic
+        )  # imwrite cannot write non-ASCII paths on Windows
+        path.write_bytes(buf.tobytes())
+        out.append(path)
+    return out
+
+
+def _picture(video, time):
+    """Picture of a video at a time (BGR, 1920 x 1080)."""
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            f"{time:.3f}",
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-s",
+            f"{W}x{H}",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    ).stdout
+    return np.frombuffer(raw, np.uint8).reshape(H, W, 3)

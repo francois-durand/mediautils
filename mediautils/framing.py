@@ -618,8 +618,12 @@ def stacked_exposure(
     end: float,
     step: float = 1.0,
     tolerance: float = 45,
+    moments: int | None = None,
 ) -> np.ndarray:
     """Every position of the people of a part of a video, sharp, on one picture.
+
+    With `moments`, only that many pictures, evenly spread, are stacked (the median
+    still comes from every picture): easier to read (Fanfan: 10).
 
     One picture every `step` seconds; each one but the first is transparent where it is
     the same as the median picture (within `tolerance`, sum of the three channels
@@ -665,8 +669,13 @@ def stacked_exposure(
     for r in range(0, h, 30):  # by bands of rows (memory)
         median[r : r + 30] = np.median(frames[:, r : r + 30], axis=0)
     med = median.astype(np.int16)
-    stack = frames[0].copy()
-    for f in frames[1:]:
+    chosen = (
+        frames
+        if moments is None
+        else frames[np.linspace(0, n - 1, moments).round().astype(int)]
+    )
+    stack = chosen[0].copy()
+    for f in chosen[1:]:
         moving = np.abs(f.astype(np.int16) - med).sum(axis=2) > tolerance
         stack[moving] = f[moving]
     return cv2.resize(stack, (W, H))

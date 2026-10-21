@@ -17,6 +17,7 @@ from mediautils.framing import framing_sheet as framing_sheet
 from mediautils.framing import interval_framings as interval_framings
 from mediautils.framing import long_exposure as long_exposure
 from mediautils.framing import Person as Person
+from mediautils.framing import stacked_exposure as stacked_exposure
 from mediautils.livesound import denoise_rushes as denoise_rushes
 from mediautils.livesound import loudness as loudness
 from mediautils.livesound import match_eq as match_eq

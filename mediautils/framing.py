@@ -430,6 +430,8 @@ def framing_files(
     side: str = "cour",
     label_time: float | None = None,
     width: int = 1920,
+    picture: np.ndarray | None = None,
+    prefix: str | None = None,
     **kwargs,
 ) -> list[Path]:
     """One picture per framing, every interval and tight shot, to be checked one by one.
@@ -460,6 +462,11 @@ def framing_files(
         video; default `time`.
     width : int
         Width of the pictures.
+    picture : np.ndarray, optional
+        Picture to cut the framings from (BGR, 1920 x 1080) instead of the video at
+        `time`, e.g. from :func:`stacked_exposure`.
+    prefix : str, optional
+        Start of the names instead of the time (e.g. ``"empilement"``).
     **kwargs
         Options of :func:`interval_framings`.
 
@@ -486,11 +493,11 @@ def framing_files(
     items = [
         (label, f, problem) for label, _, f, problem in _decide(people, camera, **opts)
     ]
-    img = _picture(video, time)
+    img = _picture(video, time) if picture is None else picture
     dst = Path(dst)
     dst.mkdir(parents=True, exist_ok=True)
     t = round(time if label_time is None else label_time)
-    stem = f"t{t // 60:02d}{t % 60:02d}_{side}"
+    stem = f"{prefix or f't{t // 60:02d}{t % 60:02d}'}_{side}"
     out = []
     for k, (label, (_, cx, cy, z), problem) in enumerate(items, 1):
         w, h = W / z, H / z
@@ -551,10 +558,10 @@ def long_exposure(
     mean : np.ndarray
         Average picture (BGR, uint8): where somebody stands most of the time, they are
         almost sharp; where they go now and then, a pale ghost.
-    sweep : np.ndarray
-        Swept area (BGR, uint8): the average picture, brightened where the picture
-        changes over time (standard deviation), so that everywhere somebody goes, even
-        briefly, shows.
+    presence : np.ndarray
+        The still background (median picture), and on it the people, opaque wherever
+        they go a little (a quarter of the time is enough): the average of the pictures
+        only where they differ clearly from the background (BGR, uint8).
     """
     raw = subprocess.run(
         [
@@ -581,18 +588,88 @@ def long_exposure(
     n = len(raw) // (W * H * 3)
     frames = np.frombuffer(raw[: n * W * H * 3], np.uint8).reshape(n, H, W, 3)
     s = np.zeros((H, W, 3))
-    s2 = np.zeros((H, W, 3))
     for f in frames:  # in float, one picture at a time (memory)
-        x = f.astype(np.float64)
-        s += x
-        s2 += x * x
+        s += f
     mean = s / n
-    std = np.sqrt(np.maximum(s2 / n - mean**2, 0)).mean(axis=2)
-    level = std / max(np.percentile(std, 99.5), 1)
-    sweep = (
-        mean * 0.35 + np.clip(level, 0, 1)[..., None] * np.array([0, 200, 255]) * 0.8
-    )
-    return mean.astype(np.uint8), np.clip(sweep, 0, 255).astype(np.uint8)
+    # presence, at half resolution (the median of every picture is heavy)
+    half = frames[:, ::2, ::2]
+    background = np.empty(half.shape[1:], np.uint8)
+    for r in range(0, half.shape[1], 30):  # by bands of rows (memory)
+        background[r : r + 30] = np.median(half[:, r : r + 30], axis=0)
+    bg = background.astype(np.int16)
+    fg_sum = np.zeros(half.shape[1:])
+    count = np.zeros(half.shape[1:3])
+    for f in half:
+        moving = np.abs(f.astype(np.int16) - bg).sum(axis=2) > 45
+        fg_sum[moving] += f[moving]
+        count += moving
+    fg = fg_sum / np.maximum(count, 1)[..., None]
+    alpha = (np.clip(count / n * 4, 0, 1) ** 0.7)[..., None]
+    presence = background * (1 - alpha) + fg * alpha
+    import cv2
+
+    presence = cv2.resize(np.clip(presence, 0, 255).astype(np.uint8), (W, H))
+    return mean.astype(np.uint8), presence
+
+
+def stacked_exposure(
+    video: str | os.PathLike,
+    start: float,
+    end: float,
+    step: float = 1.0,
+    tolerance: float = 45,
+) -> np.ndarray:
+    """Every position of the people of a part of a video, sharp, on one picture.
+
+    One picture every `step` seconds; each one but the first is transparent where it is
+    the same as the median picture (within `tolerance`, sum of the three channels
+    0-255), and they are stacked in order, the first one behind: a chronophotography
+    (Fanfan's idea). Where somebody stands most of the time, the median is them, so the
+    rare pictures where they are away may leave holes in them.
+
+    Requires ffmpeg and OpenCV (extra ``concert``). Computed at half resolution.
+
+    Returns
+    -------
+    np.ndarray
+        The picture (BGR, uint8, 1920 x 1080).
+    """
+    import cv2
+
+    w, h = W // 2, H // 2
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            f"{start:.3f}",
+            "-t",
+            f"{end - start:.3f}",
+            "-i",
+            str(video),
+            "-vf",
+            f"fps={1 / step},scale={w}:{h}",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    ).stdout
+    n = len(raw) // (w * h * 3)
+    frames = np.frombuffer(raw[: n * w * h * 3], np.uint8).reshape(n, h, w, 3)
+    median = np.empty((h, w, 3), np.uint8)
+    for r in range(0, h, 30):  # by bands of rows (memory)
+        median[r : r + 30] = np.median(frames[:, r : r + 30], axis=0)
+    med = median.astype(np.int16)
+    stack = frames[0].copy()
+    for f in frames[1:]:
+        moving = np.abs(f.astype(np.int16) - med).sum(axis=2) > tolerance
+        stack[moving] = f[moving]
+    return cv2.resize(stack, (W, H))
 
 
 def _picture(video, time):

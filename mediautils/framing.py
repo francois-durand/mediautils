@@ -93,9 +93,11 @@ def _frame(
     y0 = min(max(eyes - e * h, 0), H - h)
     if y0 > top - margin * h:  # a head would be cut: raise the frame
         y0 = max(top - margin * h, 0)
-    # horizontal position: the edges do not cut the others in the middle
+    # horizontal position: its people whole, with room (they move: showing them whole wins
+    # over hiding a neighbour, Fanfan), and the edges do not cut the others in the middle
     others = [p for k, p in enumerate(people) if k not in members]
-    lo, hi = max(x1 + margin * w * 0.5 - w, 0), min(x0 - margin * w * 0.5, W - w)
+    room = 1.5 * margin * w
+    lo, hi = max(x1 + room - w, 0), min(x0 - room, W - w)
     if lo > hi:  # the interval does not fit with its margins: centre it
         lo = hi = min(max((x0 + x1) / 2 - w / 2, 0), W - w)
     centre = min(max((x0 + x1) / 2 - w / 2, lo), hi)
@@ -304,13 +306,14 @@ def _candidates(
             ) | frozenset(members)
             frames.append((shown, frozenset(members), cx, cy, z))
             if i == j and names[i] not in no_tight:
-                # tight: zoom in, the person centred; the eyes on the third line, or higher
-                # so as to keep the hands in; zoom in less if the head would be cut
+                # tight: zoom in, the person centred; the eyes a little above the third line
+                # (Fanfan), or higher so as to keep the hands in; zoom in less if the head
+                # would be cut
                 p = ps[i]
                 zt = min(z * tight, max_zoom * tight)
                 while True:
                     h = H / zt
-                    y0 = min(max(p.eyes - eye_line * h, 0), H - h)
+                    y0 = min(max(p.eyes - min(eye_line, 0.28) * h, 0), H - h)
                     low = p.bottom if p.alone is None else max(p.bottom, p.alone)
                     if not p.tight_hands:  # a singer: the tight shot is the head
                         low = p.eyes

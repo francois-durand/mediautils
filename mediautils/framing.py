@@ -382,7 +382,7 @@ def framing_files(
     dst: str | os.PathLike,
     side: str = "cour",
     label_time: float | None = None,
-    width: int = 960,
+    width: int = 1920,
     **kwargs,
 ) -> list[Path]:
     """One picture per framing, every interval and tight shot, to be checked one by one.
@@ -484,34 +484,26 @@ def framing_files(
         text = (
             f"{label.replace('_serré', ' serré').replace('_', ' + ')}  (zoom {z:.2f})"
         )
-        cv2.putText(
-            pic, ascii_(text), (10, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5
-        )
-        cv2.putText(
-            pic, ascii_(text), (10, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2
-        )
+        s = width / 960  # sizes of the text and of the cross follow the picture
+
+        def write(t, y, colour):
+            for c, th in (((0, 0, 0), 5), (colour, 2)):
+                cv2.putText(
+                    pic,
+                    ascii_(t),
+                    (int(10 * s), int(y)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    s,
+                    c,
+                    max(1, int(th * s)),
+                )
+
+        write(text, 36 * s, (0, 255, 255))
         if problem:
             hh = pic.shape[0]
-            cv2.line(pic, (0, 0), (width - 1, hh - 1), (0, 0, 255), 8)
-            cv2.line(pic, (0, hh - 1), (width - 1, 0), (0, 0, 255), 8)
-            cv2.putText(
-                pic,
-                ascii_(problem),
-                (10, hh - 16),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (0, 0, 0),
-                5,
-            )
-            cv2.putText(
-                pic,
-                ascii_(problem),
-                (10, hh - 16),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (0, 0, 255),
-                2,
-            )
+            cv2.line(pic, (0, 0), (width - 1, hh - 1), (0, 0, 255), int(8 * s))
+            cv2.line(pic, (0, hh - 1), (width - 1, 0), (0, 0, 255), int(8 * s))
+            write(problem, hh - 16 * s, (0, 0, 255))
         path = dst / f"{stem}_{k:02d}_{label}.jpg"
         ok, buf = cv2.imencode(
             ".jpg", pic

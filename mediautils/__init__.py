@@ -15,6 +15,7 @@ from mediautils.audit import vocal_entries as vocal_entries
 from mediautils.framing import framing_files as framing_files
 from mediautils.framing import framing_sheet as framing_sheet
 from mediautils.framing import interval_framings as interval_framings
+from mediautils.framing import long_exposure as long_exposure
 from mediautils.framing import Person as Person
 from mediautils.livesound import denoise_rushes as denoise_rushes
 from mediautils.livesound import loudness as loudness

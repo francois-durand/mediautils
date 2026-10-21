@@ -535,6 +535,66 @@ def framing_files(
     return out
 
 
+def long_exposure(
+    video: str | os.PathLike,
+    start: float,
+    end: float,
+    step: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Long exposure of a part of a video: where people stand, and where they go.
+
+    One picture every `step` seconds between `start` and `end` (s of the video).
+    Requires ffmpeg.
+
+    Returns
+    -------
+    mean : np.ndarray
+        Average picture (BGR, uint8): where somebody stands most of the time, they are
+        almost sharp; where they go now and then, a pale ghost.
+    sweep : np.ndarray
+        Swept area (BGR, uint8): the average picture, brightened where the picture
+        changes over time (standard deviation), so that everywhere somebody goes, even
+        briefly, shows.
+    """
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-ss",
+            f"{start:.3f}",
+            "-t",
+            f"{end - start:.3f}",
+            "-i",
+            str(video),
+            "-vf",
+            f"fps={1 / step},scale={W}:{H}",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    ).stdout
+    n = len(raw) // (W * H * 3)
+    frames = np.frombuffer(raw[: n * W * H * 3], np.uint8).reshape(n, H, W, 3)
+    s = np.zeros((H, W, 3))
+    s2 = np.zeros((H, W, 3))
+    for f in frames:  # in float, one picture at a time (memory)
+        x = f.astype(np.float64)
+        s += x
+        s2 += x * x
+    mean = s / n
+    std = np.sqrt(np.maximum(s2 / n - mean**2, 0)).mean(axis=2)
+    level = std / max(np.percentile(std, 99.5), 1)
+    sweep = (
+        mean * 0.35 + np.clip(level, 0, 1)[..., None] * np.array([0, 200, 255]) * 0.8
+    )
+    return mean.astype(np.uint8), np.clip(sweep, 0, 255).astype(np.uint8)
+
+
 def _picture(video, time):
     """Picture of a video at a time (BGR, 1920 x 1080)."""
     raw = subprocess.run(

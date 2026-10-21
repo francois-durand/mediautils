@@ -24,7 +24,6 @@ same zoom level: that is decided when choosing the shots, from the names.
 
 import os
 import subprocess
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +46,12 @@ class Person:
         Height of the eyes.
     bottom : float
         Lowest thing that must be seen (hands, drumsticks).
+    alone : float, optional
+        Lowest thing to be seen in the shots of the person alone, if lower (the drums:
+        the shots of the drummer show them, the groups need not).
+    tight_hands : bool
+        Whether the tight shot keeps the hands (an instrumentalist) or not (the singer:
+        the head and the microphone).
     """
 
     x0: float
@@ -54,25 +59,35 @@ class Person:
     top: float
     eyes: float
     bottom: float
+    alone: float | None = None
+    tight_hands: bool = True
 
 
-def _frame(people, members, main, margin, eye_line, tolerance, max_zoom=1e9):
+def _frame(
+    people, members, main, margin, eye_line, tolerance, max_zoom=1e9, group_eye_line=0.2
+):
     """Frame (cx, cy, zoom) showing `members` (indices in `people`)."""
     ms = [people[i] for i in members]
     x0, x1 = min(p.x0 for p in ms), max(p.x1 for p in ms)
     top, bottom = min(p.top for p in ms), max(p.bottom for p in ms)
+    if len(ms) == 1 and ms[0].alone is not None:
+        bottom = max(bottom, ms[0].alone)
     eyes = people[main].eyes
     w = (x1 - x0) * (1 + 2 * margin)
-    # the eyes on the third line, or higher (up to a quarter) if that keeps the shot tighter;
-    # the heads and the hands inside, with a margin
-    best = None
-    for e in np.linspace(eye_line, min(eye_line, 0.25), 9):
-        he = max(
-            w * H / W, (eyes - top) / (e - margin), (bottom - eyes) / (1 - e - margin)
-        )
-        if best is None or he < best[0] - 1:
-            best = (he, e)
-    h, e = best
+    # the heads and the hands inside, with a margin; the eyes of a person alone on the third
+    # line, or higher (up to a quarter) if that keeps the shot tighter; a group is framed
+    # lower, its eyes at a fifth (the instruments are better seen: Fanfan), or lower in the
+    # frame (up to the third) if a head needs more air: the tightest shot, then the lowest
+    if len(members) == 1:
+        lines = np.linspace(eye_line, min(eye_line, 0.25), 9)
+    else:
+        lines = np.linspace(min(eye_line, group_eye_line), eye_line, 9)
+    needed = [
+        max(w * H / W, (eyes - top) / (e - margin), (bottom - eyes) / (1 - e - margin))
+        for e in lines
+    ]
+    k = next(k for k, he in enumerate(needed) if he <= min(needed) * 1.02)
+    h, e = needed[k], lines[k]
     h = min(max(h, H / max_zoom), H)
     w = h * W / H
     y0 = min(max(eyes - e * h, 0), H - h)
@@ -161,36 +176,106 @@ def interval_framings(
         ...           "C": Person(1300, 1800, 200, 260, 700)}
         >>> z = interval_framings(people, main="B")
         >>> sorted(z)
-        ['A', 'A-B', 'B', 'B serré', 'B-C', 'C serré', 'large']
-        >>> z["large"][3] < 1.1 and z["B serré"][3] > z["B"][3] > z["A-B"][3]
+        ['A', 'A-B', 'B', 'B-C', 'C serré', 'large']
+        >>> z["large"][3] < 1.1 and z["B"][3] > z["A-B"][3]
         True
 
-    C alone would show B (C is close to the camera, its shot is wide): there is only
-    ``"B-C"`` and the tight shot of C; the tight shot of A would be almost ``"A"``.
-    B alone is centred on B:
+    C alone would be almost ``"B-C"`` (C is close to the camera and to the edge, its
+    shot is wide); the tight shots of A and B would not be clearly tighter than A and B
+    alone (their hands must stay in). B alone is centred on B:
 
         >>> cam, cx, cy, zoom = z["B"]
         >>> cx
         950.0
     """
+    items = _decide(
+        people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
+    )
+    return {name: f for _, name, f, problem in items if not problem}
+
+
+def _decide(
+    people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
+):
+    """Every framing, in the order of the axis: ``(file label, name, framing, problem)``.
+
+    For each person, the intervals that start with them from the largest, then the person
+    alone and their tight shot. `problem` is ``""`` for a framing that works, else why not:
+
+    - a group that shows other people too, or that is almost a larger group;
+    - a person alone (who may show their neighbours) that is almost a group;
+    - a tight shot that is almost a group, or not clearly tighter than the person alone
+      (then, if the shot of the person alone shows other people, the tight shot wins).
+    """
     names = list(people)
-    ps = [people[n] for n in names]
-
-    def label(ks):
-        i, j = min(ks), max(ks)
-        if i == 0 and j == len(ps) - 1:
-            return "large"
-        return names[i] if i == j else f"{names[i]}-{names[j]}"
-
+    n = len(names)
     frames, tights = _candidates(
         people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
     )
-    tights = {f"{names[i]} serré": f for i, f in tights.items()}
-    frames = [f[:5] for f in frames]
-    # a framing is named after the people it shows; two framings showing the same people at
-    # about the same zoom are one (the one computed for exactly those people is kept)
-    out, kept = {}, {}  # kept: name -> (shown, members, zoom)
-    return _merge(frames, tights, names, label, camera, out, kept)
+    by_members = {f[1]: f for f in frames}
+
+    def framing(members):
+        _, _, cx, cy, z = by_members[frozenset(members)]
+        return (camera, float(cx), float(cy), float(z))
+
+    def name(i, j):
+        if i == 0 and j == n - 1:
+            return "large"
+        return names[i] if i == j else f"{names[i]}-{names[j]}"
+
+    problems = {}
+    # groups: they show their people only; of two almost equal groups, the larger is kept
+    groups = sorted(
+        ((i, j) for i in range(n) for j in range(i + 1, n)), key=lambda g: g[0] - g[1]
+    )
+    valid = {}
+    for i, j in groups:
+        shown, members = by_members[frozenset(range(i, j + 1))][:2]
+        if shown != members:
+            problems[i, j] = "montre aussi " + ", ".join(
+                names[k] for k in sorted(shown - members)
+            )
+            continue
+        f = framing(range(i, j + 1))
+        twin = next((g for g in valid if _overlap(f, valid[g]) > 0.85), None)
+        if twin:
+            problems[i, j] = f"presque le meme que {name(*twin)}"
+            continue
+        valid[i, j] = f
+    # people alone: centred on them, their neighbours may be seen
+    for i in range(n):
+        f = framing([i])
+        twin = next((g for g in valid if _overlap(f, valid[g]) > 0.9), None)
+        if twin:
+            problems[i, i] = f"presque le meme que {name(*twin)}"
+    # tight shots
+    for i, ft in tights.items():
+        twin = next((g for g in valid if _overlap(ft, valid[g]) > 0.75), None)
+        if twin:
+            problems[i, "t"] = f"presque le meme que {name(*twin)}"
+        elif (i, i) not in problems and ft[3] < 1.15 * framing([i])[3]:
+            shown, members = by_members[frozenset([i])][:2]
+            if shown != members:
+                problems[i, i] = f"presque le meme que {names[i]} serré"
+            else:
+                problems[i, "t"] = f"pas vraiment plus serre que {names[i]}"
+    items = []
+    for i in range(n):
+        for j in range(n - 1, i - 1, -1):
+            label = names[i] if i == j else f"{names[i]}_{names[j]}"
+            items.append(
+                (label, name(i, j), framing(range(i, j + 1)), problems.get((i, j), ""))
+            )
+        if i in tights:
+            items.append(
+                (
+                    f"{names[i]}_serré",
+                    f"{names[i]} serré",
+                    tights[i],
+                    problems.get((i, "t"), ""),
+                )
+            )
+    return items
 
 
 def _candidates(
@@ -226,58 +311,17 @@ def _candidates(
                 while True:
                     h = H / zt
                     y0 = min(max(p.eyes - eye_line * h, 0), H - h)
-                    y0 = max(y0, min(p.bottom + 0.02 * h - h, H - h))  # the hands in
-                    if y0 <= p.top - 0.02 * h or zt <= z:
+                    low = p.bottom if p.alone is None else max(p.bottom, p.alone)
+                    if not p.tight_hands:  # a singer: the tight shot is the head
+                        low = p.eyes
+                    y0 = max(y0, min(low + 0.02 * h - h, H - h))  # the hands in
+                    # some air above the head (Fanfan: the edge must not scratch it)
+                    if y0 <= p.top - 0.08 * h or zt <= z:
                         break
                     zt *= 0.97
                 x = min(max((p.x0 + p.x1) / 2, W / zt / 2), W - W / zt / 2)
                 tights[i] = (camera, float(x), float(y0 + h / 2), float(zt))
     return frames, tights
-
-
-def _merge(frames, tights, names, label, camera, out, kept):
-    """Name the framings after the people they show, merge the near-duplicates."""
-
-    def twin(shown, z):
-        return next(
-            (
-                n
-                for n, (s, _, zk) in kept.items()
-                if s == shown and abs(zk / z - 1) < 0.15
-            ),
-            None,
-        )
-
-    for shown, members, cx, cy, z in sorted(frames, key=lambda f: len(f[1]) == 1):
-        if len(members) == 1 and shown != members:
-            # a person alone who cannot be framed without a neighbour
-            if twin(shown, z):
-                continue
-            (k,) = members
-            name = (
-                f"{names[k]} (+ {', '.join(names[o] for o in sorted(shown - members))})"
-            )
-        else:
-            name = label(shown)
-            t = twin(shown, z)
-            if t is not None:
-                if kept[t][1] == shown or members != shown:
-                    continue
-                del out[t], kept[t]
-        kept[name] = (shown, members, z)
-        out[name] = (camera, float(cx), float(cy), float(z))
-    # almost the same picture (near the edge of the picture, or a person close to the camera):
-    # a person with a neighbour gives way to their tight shot; a tight shot that is almost a
-    # group gives way to the group (a real tight shot is not possible there)
-    for t, ft in list(tights.items()):
-        for n in [n for n in out if "(+" in n]:
-            if n.startswith(t.removesuffix(" serré")) and _overlap(ft, out[n]) > 0.75:
-                del out[n]
-        if any(_overlap(ft, f) > 0.75 for f in out.values()):
-            warnings.warn(f"{t}: almost the same as a group framing, dropped")
-            del tights[t]
-    out.update(tights)
-    return out
 
 
 def _overlap(a, b):
@@ -436,39 +480,14 @@ def framing_files(
         max_zoom=2.4,
     )
     opts.update(kwargs)
-    final = interval_framings(people, camera=camera, **opts)
-    frames, tights = _candidates(people, camera, **opts)
-    names = list(people)
-    by_members = {f[1]: f for f in frames}
+    items = [
+        (label, f, problem) for label, _, f, problem in _decide(people, camera, **opts)
+    ]
     img = _picture(video, time)
     dst = Path(dst)
     dst.mkdir(parents=True, exist_ok=True)
     t = round(time if label_time is None else label_time)
     stem = f"t{t // 60:02d}{t % 60:02d}_{side}"
-
-    def nearest(f):
-        return max(final, key=lambda n: _overlap(f, final[n]))
-
-    items = []
-    for i in range(len(names)):
-        for j in range(len(names) - 1, i - 1, -1):
-            members = frozenset(range(i, j + 1))
-            shown, _, cx, cy, z = by_members[members]
-            f = (camera, cx, cy, z)
-            label = names[i] if i == j else f"{names[i]}_{names[j]}"
-            problem = ""
-            if shown != members:
-                problem = "montre aussi " + ", ".join(
-                    names[k] for k in sorted(shown - members)
-                )
-            n = nearest(f)
-            if not problem and _overlap(f, final[n]) < 0.98:
-                problem = f"presque le meme que {n}"
-            items.append((label, f, problem))
-        if i in tights:
-            n = f"{names[i]} serré"
-            problem = "" if n in final else f"presque le meme que {nearest(tights[i])}"
-            items.append((f"{names[i]}_serré", tights[i], problem))
     out = []
     for k, (label, (_, cx, cy, z), problem) in enumerate(items, 1):
         w, h = W / z, H / z

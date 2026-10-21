@@ -278,8 +278,10 @@ def fit_zooms(
     stands: the zoom is centred on the median positions of its people, its height puts
     the median top of their heads `target` of the zoom's height under its top edge,
     unless that would leave less than `min_margin` above more than `percentile` % of
-    their heads. Other people may be
-    cut by a zoom (accepted: a close-up on someone cuts the neighbours).
+    their heads. Other people may be cut by a zoom (accepted: a close-up on someone cuts
+    the neighbours), except those given as a 4th element ``[x, ...]``: neighbours well
+    seen in the zoom, whose heads must not be cut either (e.g. the singer next to a
+    guitarist).
 
     The framing of a camera changes from song to song: fit the zooms of each song.
     """
@@ -310,14 +312,21 @@ def fit_zooms(
     cap.release()
     faces = np.array(faces).reshape(-1, 2)
     out = {}
-    for name, (cam, xs, z) in framings.items():
+    for name, (cam, xs, z, *more) in framings.items():
         w, h = 1920 / z, 1080 / z
         people = [faces[abs(faces[:, 0] - x) < reach] for x in xs]
         if any(len(p) == 0 for p in people):
             continue
         cx = float(np.mean([np.median(p[:, 0]) for p in people]))
         best = min(np.median(p[:, 1]) for p in people) - target * h
-        safe = min(np.percentile(p[:, 1], percentile) for p in people) - min_margin * h
+        # the heads not to cut: its people, and the neighbours given as a 4th element (well seen in it)
+        guarded = people + [
+            faces[abs(faces[:, 0] - x) < reach] for x in (more[0] if more else [])
+        ]
+        safe = (
+            min(np.percentile(p[:, 1], percentile) for p in guarded if len(p))
+            - min_margin * h
+        )
         y0 = min(best, safe)
         cy = float(min(max(y0 + h / 2, h / 2), 1080 - h / 2))
         out[name] = (cam, float(min(max(cx, w / 2), 1920 - w / 2)), cy, z)

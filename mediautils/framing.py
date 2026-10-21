@@ -130,7 +130,7 @@ def interval_framings(
     main: str | None = None,
     margin: float = 0.04,
     eye_line: float = 1 / 3,
-    tight: float = 1.35,
+    tight: float = 1.22,
     tolerance: float = 0.15,
     no_tight: tuple[str, ...] = (),
     max_zoom: float = 2.4,
@@ -488,7 +488,7 @@ def framing_files(
         main=None,
         margin=0.04,
         eye_line=1 / 3,
-        tight=1.35,
+        tight=1.22,  # Fanfan: the tight shot of the singer a little looser (his elbow in)
         tolerance=0.15,
         no_tight=(),
         max_zoom=2.4,

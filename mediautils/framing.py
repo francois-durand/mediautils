@@ -134,6 +134,7 @@ def interval_framings(
     tolerance: float = 0.15,
     no_tight: tuple[str, ...] = (),
     max_zoom: float = 2.4,
+    fixed: dict[str, tuple[float, float, float]] | None = None,
 ) -> dict[str, tuple[str, float, float, float]]:
     """Every framing of a camera: the intervals of its axis, and a tight shot per person.
 
@@ -157,6 +158,10 @@ def interval_framings(
         Share of a person's box an edge may cut (a piece at the edge is tolerated).
     no_tight : tuple[str, ...]
         People without a tight shot.
+    fixed : dict, optional
+        Framings placed by eye, replacing the computed ones: ``name -> (centre_x,
+        centre_y, zoom)``, the name as returned (``"Fanfan-Laetitia"``, ``"Thomas serré"``).
+        They are taken as they are (Fanfan validates them on the pictures).
     max_zoom : float
         Largest zoom of a framing (picture quality: far, small people are not blown up);
         a tight shot may go `tight` times further.
@@ -193,7 +198,23 @@ def interval_framings(
     items = _decide(
         people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
     )
-    return {name: f for _, name, f, problem in items if not problem}
+    return {
+        name: f for _, name, f, problem in _fix(items, fixed, camera) if not problem
+    }
+
+
+def _fix(items, fixed, camera):
+    """The framings placed by eye replace the computed ones (and are valid)."""
+    fixed = fixed or {}
+    unknown = set(fixed) - {name for _, name, _, _ in items}
+    if unknown:
+        raise ValueError(f"unknown framings: {sorted(unknown)}")
+    return [
+        (label, name, (camera, *map(float, fixed[name])), "")
+        if name in fixed
+        else (label, name, f, p)
+        for label, name, f, p in items
+    ]
 
 
 def _decide(
@@ -475,7 +496,7 @@ def framing_files(
         Names ``cour_01_Thomas_Mathieu_t0100.jpg``: with several times, the pictures of
         a framing follow one another (Fanfan: 5 times, easier to judge).
     **kwargs
-        Options of :func:`interval_framings`.
+        Options of :func:`interval_framings` (``fixed`` included).
 
     Returns
     -------
@@ -496,9 +517,11 @@ def framing_files(
         no_tight=(),
         max_zoom=2.4,
     )
+    fixed = kwargs.pop("fixed", None)
     opts.update(kwargs)
     items = [
-        (label, f, problem) for label, _, f, problem in _decide(people, camera, **opts)
+        (label, f, problem)
+        for label, _, f, problem in _fix(_decide(people, camera, **opts), fixed, camera)
     ]
     img = _picture(video, time) if picture is None else picture
     dst = Path(dst)

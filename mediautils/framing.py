@@ -247,7 +247,8 @@ def _decide(
     # people alone: centred on them, their neighbours may be seen
     for i in range(n):
         f = framing([i])
-        twin = next((g for g in valid if _overlap(f, valid[g]) > 0.9), None)
+        # (0.8: a person close to the camera at the edge, framed with their hands, is a group)
+        twin = next((g for g in valid if _overlap(f, valid[g]) > 0.8), None)
         if twin:
             problems[i, i] = f"presque le meme que {name(*twin)}"
     # tight shots

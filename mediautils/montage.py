@@ -604,19 +604,25 @@ def _rect(cx, cy, z):
     return f"{-x0 * z:.1f} {-y0 * z:.1f} {1920 * z:.1f} {1080 * z:.1f} 1"
 
 
-def _affine(fid, cx, cy, z, z_start=None, frames=0):
+def _affine(fid, cx, cy, z, z_start=None, cx_start=None, cy_start=None, frames=0):
     """Shotcut "Size, Position & Rotate" filter: zoom `z` centred on (cx, cy) of a 1920x1080 frame.
 
-    With `z_start`, a progressive zoom from `z_start` to `z` over `frames` frames (linear keyframes).
+    With `z_start`, a progressive zoom from `z_start` to `z` over `frames` frames (linear keyframes),
+    starting centred on (`cx_start`, `cy_start`) if given (e.g. exactly the framing of the shot before,
+    so that the start does not jump), else on (cx, cy).
 
     >>> _affine("f", 960, 540, 2.0).find("property[@name='transition.rect']").text
     '-960.0 -540.0 3840.0 2160.0 1'
-    >>> _affine("f", 960, 540, 2.0, 1.0, 100).find("property[@name='transition.rect']").text
+    >>> _affine("f", 960, 540, 2.0, 1.0, frames=100).find("property[@name='transition.rect']").text
     '0=-0.0 -0.0 1920.0 1080.0 1;99=-960.0 -540.0 3840.0 2160.0 1'
+    >>> _affine("f", 700, 540, 2.0, 1.5, 960, 540, frames=100).find("property[@name='transition.rect']").text
+    '0=-480.0 -270.0 2880.0 1620.0 1;99=-440.0 -540.0 3840.0 2160.0 1'
     """
     rect = _rect(cx, cy, z)
     if z_start is not None and frames > 1:
-        rect = f"0={_rect(cx, cy, z_start)};{frames - 1}={rect}"
+        x0 = cx if cx_start is None else cx_start
+        y0 = cy if cy_start is None else cy_start
+        rect = f"0={_rect(x0, y0, z_start)};{frames - 1}={rect}"
     filt = ET.Element("filter", id=fid)
     for k, v in [
         ("background", "color:#00000000"),
@@ -667,7 +673,9 @@ def build_montage(
     zooms : dict[str, tuple[str, float, float, float]]
         Name -> ``(camera, centre_x, centre_y, factor)``, in pixels of the
         1920x1080 source; ``(camera, centre_x, centre_y, factor, start_factor)``
-        for a progressive zoom from `start_factor` to `factor` over the shot.
+        for a progressive zoom from `start_factor` to `factor` over the shot;
+        ``(camera, centre_x, centre_y, factor, start_factor, start_x, start_y)`` to
+        start it from exactly another framing (no jump at the start).
     beats : array-like
         Beat times (seconds), e.g. from :func:`timeline_beats`.
     dst : str | os.PathLike

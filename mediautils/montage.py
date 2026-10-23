@@ -25,6 +25,7 @@ files). Paths of source files inside the projects are kept relative.
 """
 
 import copy
+import math
 import os
 import re
 import subprocess
@@ -607,22 +608,39 @@ def _rect(cx, cy, z):
 def _affine(fid, cx, cy, z, z_start=None, cx_start=None, cy_start=None, frames=0):
     """Shotcut "Size, Position & Rotate" filter: zoom `z` centred on (cx, cy) of a 1920x1080 frame.
 
-    With `z_start`, a progressive zoom from `z_start` to `z` over `frames` frames (linear keyframes),
-    starting centred on (`cx_start`, `cy_start`) if given (e.g. exactly the framing of the shot before,
-    so that the start does not jump), else on (cx, cy).
+    With `z_start`, a progressive zoom from `z_start` to `z` over `frames` frames, starting centred on
+    (`cx_start`, `cy_start`) if given (e.g. exactly the framing of the shot before, so that the start
+    does not jump), else on (cx, cy). The zoom follows a smooth curve, slow at both ends like a zoom by
+    hand (cosine ease-in-out: no jump of speed at the start nor at the end, Fanfan): one keyframe per
+    frame.
 
     >>> _affine("f", 960, 540, 2.0).find("property[@name='transition.rect']").text
     '-960.0 -540.0 3840.0 2160.0 1'
-    >>> _affine("f", 960, 540, 2.0, 1.0, frames=100).find("property[@name='transition.rect']").text
-    '0=-0.0 -0.0 1920.0 1080.0 1;99=-960.0 -540.0 3840.0 2160.0 1'
-    >>> _affine("f", 700, 540, 2.0, 1.5, 960, 540, frames=100).find("property[@name='transition.rect']").text
-    '0=-480.0 -270.0 2880.0 1620.0 1;99=-440.0 -540.0 3840.0 2160.0 1'
+    >>> keys = _affine("f", 960, 540, 2.0, 1.0, frames=100).find("property[@name='transition.rect']").text
+    >>> keys = keys.split(";")
+    >>> len(keys), keys[0], keys[-1]
+    (100, '0=-0.0 -0.0 1920.0 1080.0 1', '99=-960.0 -540.0 3840.0 2160.0 1')
+
+    Slow at the start: after a tenth of the time, a fortieth of the way (zoom 1.025, not 1.1):
+
+    >>> keys[10]
+    '10=-24.0 -13.5 1967.9 1107.0 1'
+    >>> keys = _affine("f", 700, 540, 2.0, 1.5, 960, 540, frames=100).find("property[@name='transition.rect']")
+    >>> keys.text.split(";")[0], keys.text.split(";")[-1]
+    ('0=-480.0 -270.0 2880.0 1620.0 1', '99=-440.0 -540.0 3840.0 2160.0 1')
     """
     rect = _rect(cx, cy, z)
     if z_start is not None and frames > 1:
         x0 = cx if cx_start is None else cx_start
         y0 = cy if cy_start is None else cy_start
-        rect = f"0={_rect(x0, y0, z_start)};{frames - 1}={rect}"
+        keys = []
+        for k in range(frames):
+            e = (
+                1 - math.cos(math.pi * k / (frames - 1))
+            ) / 2  # 0 -> 1, zero speed at both ends
+            zk = z_start + (z - z_start) * e
+            keys.append(f"{k}={_rect(x0 + (cx - x0) * e, y0 + (cy - y0) * e, zk)}")
+        rect = ";".join(keys)
     filt = ET.Element("filter", id=fid)
     for k, v in [
         ("background", "color:#00000000"),

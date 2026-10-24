@@ -18,8 +18,10 @@ from mediautils.framing import interval_framings as interval_framings
 from mediautils.framing import long_exposure as long_exposure
 from mediautils.framing import Person as Person
 from mediautils.framing import stacked_exposure as stacked_exposure
+from mediautils.grid import band_entry as band_entry
 from mediautils.grid import bar_markers as bar_markers
 from mediautils.grid import BarGrid as BarGrid
+from mediautils.grid import count_in as count_in
 from mediautils.grid import drum_onsets as drum_onsets
 from mediautils.grid import fill_beats as fill_beats
 from mediautils.grid import numbered_beat_markers as numbered_beat_markers

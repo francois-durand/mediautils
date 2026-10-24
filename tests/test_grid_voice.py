@@ -6,7 +6,9 @@ import pytest
 from mediautils import (
     BarGrid,
     Voice,
+    band_entry,
     bar_markers,
+    count_in,
     fill_beats,
     numbered_beat_markers,
     snap,
@@ -143,3 +145,23 @@ def test_estimate_shifts():
     c, bad = combine_shifts(s)
     assert bad == 0
     assert np.allclose(c - c[0], np.array(true) - true[0], atol=0.3)
+
+
+def test_band_entry_and_count_in(tmp_path):
+    # rush: a chord tuned at 1 s (speech, tuning), the band from 6 s; the project starts at 2 s
+    sr = 8000
+    t = np.arange(int(sr * 20)) / sr
+    other = 0.001 * np.sin(2 * np.pi * 330 * t)
+    other[(t > 1) & (t < 1.5)] = 0.3
+    other[t >= 6] = 0.3 * np.sin(2 * np.pi * 330 * t[t >= 6])
+    for name, x in (("other", other), ("bass", other / 2)):
+        sf.write(tmp_path / f"{name}.wav", np.stack([x, x], axis=1), sr)
+    entry = band_entry(tmp_path, offset=2.0)
+    assert entry == pytest.approx(4.0, abs=0.3)
+    beat = 0.5
+    sticks = [entry + k * beat for k in (-8, -6, -4, -3, -2, -1)]
+    playing = list(entry + np.arange(0, 20) * beat / 2)
+    assert count_in(
+        sticks + [3.3] + playing, beat, before=entry + 0.3
+    ) == pytest.approx(entry)
+    assert count_in(playing, beat, before=entry + 0.3) is None

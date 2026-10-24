@@ -112,6 +112,105 @@ def snap(times, onsets, reach: float = 0.06) -> np.ndarray:
     return t
 
 
+def count_in(
+    onsets,
+    beat: float,
+    pattern=(-8, -6, -4, -3, -2, -1),
+    tolerance: float = 0.06,
+    before: float | None = None,
+) -> float | None:
+    """First beat 1 of a song from the drummer's count-in (sticks), or None.
+
+    The usual count-in « 1, 3, 1, 2, 3, 4 »: sticks on beats 1 and 3 of a bar, then on
+    every beat of the next one; the song starts one beat after the last stick. A time is
+    that first 1 if there is an onset at each of its `pattern` positions (in beats, within
+    `tolerance` seconds) and few other onsets in between, at most one per stick (the
+    drums playing are not a count-in); the first such time is returned. Give `before` (the
+    entry of the band, see :func:`band_entry`): a count-in is just before it, never in
+    the middle of the song.
+
+    Parameters
+    ----------
+    onsets : array-like
+        Attacks (e.g. :func:`drum_onsets` of the drums stem, where the sticks are heard).
+    beat : float
+        Length of a beat (seconds), e.g. the median interval of the detected beats.
+    pattern : sequence of int
+        Positions of the sticks, in beats, relative to the first 1.
+    tolerance : float
+        Largest distance between an expected stick and an onset (seconds).
+    before : float, optional
+        Look for the count-in only before this time.
+
+    Examples
+    --------
+        >>> sticks = [0.61, 1.55, 2.50, 2.97, 3.43, 3.88]
+        >>> count_in(sticks + [4.33, 4.80, 5.25], beat=0.464)
+        4.33
+        >>> count_in([0.6, 1.1, 1.5], beat=0.464) is None
+        True
+        >>> drums = np.arange(0, 10, 0.116)  # the drums playing: not a count-in
+        >>> count_in(drums, beat=0.464) is None
+        True
+    """
+    o = np.sort(np.asarray(onsets, float))
+    for d in o:
+        if before is not None and d > before:
+            break
+        expected = d + np.asarray(pattern) * beat
+        if not all(np.min(np.abs(o - e)) <= tolerance for e in expected):
+            continue
+        inside = o[(o > expected[0] + tolerance) & (o < d - tolerance)]
+        extra = sum(np.min(np.abs(expected - t)) > tolerance for t in inside)
+        if extra <= len(pattern):
+            return float(d)
+    return None
+
+
+def band_entry(
+    stems: str | os.PathLike,
+    offset: float = 0.0,
+    start: float = 0.0,
+    rise: float = 10.0,
+    hold: float = 2.0,
+    step: float = 0.25,
+) -> float:
+    """Entry of the band: first time the guitars and the bass reach their level of the song.
+
+    Parameters
+    ----------
+    stems : str | os.PathLike
+        Folder of the Demucs stems of a rush (``bass.wav``, ``other.wav``).
+    offset : float
+        Time of the rush = time of the project + `offset` (seconds).
+    start : float
+        Look from this time of the project on (before it: tuning, speech).
+    rise : float
+        The band plays when the level is within `rise` dB of its median while playing
+        (the loud half of the song) during `hold` seconds.
+    hold : float
+        Seconds.
+    step : float
+        Window length (seconds).
+    """
+    import soundfile as sf
+
+    total = None
+    for name in ("bass", "other"):
+        x, sr = sf.read(os.path.join(stems, f"{name}.wav"), always_2d=True)
+        x = x.mean(axis=1) ** 2
+        total = x if total is None else total[: len(x)] + x[: len(total)]
+    h = int(sr * step)
+    n = len(total) // h
+    e = 10 * np.log10(total[: n * h].reshape(n, h).mean(axis=1) + 1e-12)
+    playing = np.median(e[e > np.median(e)])
+    k = max(int(round(hold / step)), 1)
+    loud = e > playing - rise
+    held = np.array([loud[i : i + k].all() for i in range(len(loud))])
+    held[: max(int((start + offset) / step), 0)] = False
+    return float(np.argmax(held) * step - offset)
+
+
 def regular_beats(beats, start: float, window: float = 6.0) -> np.ndarray:
     """Beats redrawn from `start` at the local median beat (±`window` s), forwards and back.
 

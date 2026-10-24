@@ -258,6 +258,10 @@ class BarGrid:
         (2.0, 3.0, 2.25)
         >>> g.downbeats().tolist()
         [2.0, 4.0]
+        >>> g.time(1)
+        Traceback (most recent call last):
+        ...
+        IndexError: beat 1.1.0 before the grid
     """
 
     def __init__(self, beats, index: int, bar: int = 1, beats_per_bar: int = 4):
@@ -336,8 +340,13 @@ class BarGrid:
         return n // self.per_bar + 1, n % self.per_bar + 1
 
     def time(self, bar: int, beat: float = 1.0) -> float:
-        """Time of a beat (a fractional beat is interpolated: 4.5 = the « 4 et »)."""
+        """Time of a beat (a fractional beat is interpolated: 4.5 = the « 4 et »).
+
+        Raises IndexError for a beat before the first one of the grid (e.g. a cut bar).
+        """
         k = (bar - 1) * self.per_bar + int(beat) - 1 - self.offset
+        if k < 0:
+            raise IndexError(f"beat {bar}.{beat} before the grid")
         frac = beat - int(beat)
         t = self.beats[k]
         return float(t + frac * (self.beats[k + 1] - t)) if frac else float(t)

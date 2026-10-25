@@ -125,9 +125,11 @@ def count_in(
     every beat of the next one; the song starts one beat after the last stick. A time is
     that first 1 if there is an onset at each of its `pattern` positions (in beats, within
     `tolerance` seconds) and few other onsets in between, at most one per stick (the
-    drums playing are not a count-in); the first such time is returned. Give `before` (the
-    entry of the band, see :func:`band_entry`): a count-in is just before it, never in
-    the middle of the song.
+    drums playing are not a count-in). Give `before` (the entry of the band, see
+    :func:`band_entry`): a count-in is just before it, never in the middle of the song; the
+    latest such time before it is returned (an earlier one may match by chance), else the
+    first one. Other count-ins: :data:`HALF_TIME` (« 1, 2, 3, 4 » on every other beat), often
+    a little slower than the song (try a slightly longer `beat`).
 
     Parameters
     ----------
@@ -152,8 +154,16 @@ def count_in(
         >>> drums = np.arange(0, 10, 0.116)  # the drums playing: not a count-in
         >>> count_in(drums, beat=0.464) is None
         True
+
+    The half-time count-in of Born to be wild (Burlingue 2026), a little slower than the song
+    (beat 0.418 s): an earlier time matches too, the one just before the band is kept:
+
+        >>> on = [0.71, 1.59, 2.02, 2.48, 2.69, 3.37, 3.79, 4.24, 4.65, 5.10]
+        >>> count_in(on, 0.4425, HALF_TIME, tolerance=0.08, before=4.35)
+        4.24
     """
     o = np.sort(np.asarray(onsets, float))
+    found = []
     for d in o:
         if before is not None and d > before:
             break
@@ -163,8 +173,14 @@ def count_in(
         inside = o[(o > expected[0] + tolerance) & (o < d - tolerance)]
         extra = sum(np.min(np.abs(expected - t)) > tolerance for t in inside)
         if extra <= len(pattern):
-            return float(d)
-    return None
+            found.append(float(d))
+    if not found:
+        return None
+    return found[-1] if before is not None else found[0]
+
+
+HALF_TIME = (-8, -6, -4, -2)
+"""Count-in « 1, 2, 3, 4 » with the sticks on every other beat (:func:`count_in`)."""
 
 
 def band_entry(

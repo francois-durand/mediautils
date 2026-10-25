@@ -29,6 +29,7 @@ import math
 import os
 import re
 import subprocess
+import time
 import wave
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -82,10 +83,18 @@ def _prop(el, name):
     return None if p is None else p.text
 
 
-def _write(tree, path):
-    with open(path, "wb") as fh:
-        fh.write(b'<?xml version="1.0" standalone="no"?>\n')
-        tree.write(fh, encoding="utf-8", xml_declaration=False)
+def _write(tree, path, tries=5):
+    """Write a project; retried a few times: Dropbox may lock a file it is syncing (OSError 22)."""
+    for k in range(tries):
+        try:
+            with open(path, "wb") as fh:
+                fh.write(b'<?xml version="1.0" standalone="no"?>\n')
+                tree.write(fh, encoding="utf-8", xml_declaration=False)
+            return
+        except OSError:
+            if k == tries - 1:
+                raise
+            time.sleep(1 + k)
 
 
 def _clock_of(root):

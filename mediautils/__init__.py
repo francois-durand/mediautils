@@ -22,7 +22,6 @@ from mediautils.grid import band_entry as band_entry
 from mediautils.grid import bar_markers as bar_markers
 from mediautils.grid import BarGrid as BarGrid
 from mediautils.grid import count_in as count_in
-from mediautils.grid import HALF_TIME as HALF_TIME
 from mediautils.grid import drum_onsets as drum_onsets
 from mediautils.grid import fill_beats as fill_beats
 from mediautils.grid import numbered_beat_markers as numbered_beat_markers

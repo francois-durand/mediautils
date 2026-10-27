@@ -200,24 +200,28 @@ def interval_framings(
         >>> cx
         950.0
 
-    A framing added by eye:
+    A framing added by eye takes its place in the order of the axis (who is on the
+    left, who is on the right, then the zoom):
 
-        >>> interval_framings(people, main="B", extra={"B très serré": (950, 400, 3)})["B très serré"]
+        >>> z = interval_framings(people, main="B", extra={"B très serré": (950, 400, 3)})
+        >>> z["B très serré"]
         ('L', 950.0, 400.0, 3.0)
+        >>> list(z)
+        ['large', 'A-B', 'A', 'B-C', 'B', 'B très serré', 'C serré']
     """
     items = _decide(
         people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
     )
     return {
         name: f
-        for _, name, f, problem in _fix(items, fixed, camera, extra)
+        for _, name, f, problem in _fix(items, fixed, camera, extra, list(people))
         if not problem
     }
 
 
-def _fix(items, fixed, camera, extra=None):
+def _fix(items, fixed, camera, extra=None, order=()):
     """The framings placed by eye replace the computed ones (and are valid); `extra` ones
-    are added."""
+    are inserted in the order of the axis (`order`: the people from left to right)."""
     fixed, extra = fixed or {}, extra or {}
     names = {name for _, name, _, _ in items}
     unknown = set(fixed) - names
@@ -227,15 +231,34 @@ def _fix(items, fixed, camera, extra=None):
         raise ValueError(
             f"extra framings already computed: {sorted(set(extra) & names)}"
         )
-    return [
+    out = [
         (label, name, (camera, *map(float, fixed[name])), "")
         if name in fixed
         else (label, name, f, p)
         for label, name, f, p in items
-    ] + [
-        (name.replace("-", "_"), name, (camera, *map(float, f)), "")
-        for name, f in extra.items()
     ]
+
+    def key(name, zoom):
+        """(left person, right person from the furthest, zoom); None: not on the axis."""
+        left = name.split("-")[0].split(" ")[0]
+        right = name.split("-")[-1].split(" ")[0]
+        if left not in order or right not in order:
+            return None
+        return order.index(left), -order.index(right), zoom
+
+    for name, f in extra.items():
+        item = (name.replace("-", "_"), name, (camera, *map(float, f)), "")
+        k = key(name, float(f[2]))
+        at = len(out)
+        if k is not None:  # after the last framing that comes before it
+            before = [
+                i
+                for i, (_, n, g, _) in enumerate(out)
+                if key(n, g[3]) is not None and key(n, g[3]) <= k
+            ]
+            at = before[-1] + 1 if before else 0
+        out.insert(at, item)
+    return out
 
 
 def _decide(
@@ -544,7 +567,7 @@ def framing_files(
     items = [
         (label, f, problem)
         for label, _, f, problem in _fix(
-            _decide(people, camera, **opts), fixed, camera, extra
+            _decide(people, camera, **opts), fixed, camera, extra, list(people)
         )
     ]
     img = _picture(video, time) if picture is None else picture

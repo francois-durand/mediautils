@@ -135,6 +135,7 @@ def interval_framings(
     no_tight: tuple[str, ...] = (),
     max_zoom: float = 2.4,
     fixed: dict[str, tuple[float, float, float]] | None = None,
+    extra: dict[str, tuple[float, float, float]] | None = None,
 ) -> dict[str, tuple[str, float, float, float]]:
     """Every framing of a camera: the intervals of its axis, and a tight shot per person.
 
@@ -162,6 +163,10 @@ def interval_framings(
         Framings placed by eye, replacing the computed ones: ``name -> (centre_x,
         centre_y, zoom)``, the name as returned (``"Fanfan-Laetitia"``, ``"Thomas serré"``).
         They are taken as they are (Fanfan validates them on the pictures).
+    extra : dict, optional
+        Framings placed by eye that are not computed (e.g. ``"Fanfan très serré"``, the
+        head and the microphone), same form as `fixed`; added after the others, so that
+        every framing used in a montage is among the pictures to validate.
     max_zoom : float
         Largest zoom of a framing (picture quality: far, small people are not blown up);
         a tight shot may go `tight` times further.
@@ -194,26 +199,42 @@ def interval_framings(
         >>> cam, cx, cy, zoom = z["B"]
         >>> cx
         950.0
+
+    A framing added by eye:
+
+        >>> interval_framings(people, main="B", extra={"B très serré": (950, 400, 3)})["B très serré"]
+        ('L', 950.0, 400.0, 3.0)
     """
     items = _decide(
         people, camera, main, margin, eye_line, tight, tolerance, no_tight, max_zoom
     )
     return {
-        name: f for _, name, f, problem in _fix(items, fixed, camera) if not problem
+        name: f
+        for _, name, f, problem in _fix(items, fixed, camera, extra)
+        if not problem
     }
 
 
-def _fix(items, fixed, camera):
-    """The framings placed by eye replace the computed ones (and are valid)."""
-    fixed = fixed or {}
-    unknown = set(fixed) - {name for _, name, _, _ in items}
+def _fix(items, fixed, camera, extra=None):
+    """The framings placed by eye replace the computed ones (and are valid); `extra` ones
+    are added."""
+    fixed, extra = fixed or {}, extra or {}
+    names = {name for _, name, _, _ in items}
+    unknown = set(fixed) - names
     if unknown:
         raise ValueError(f"unknown framings: {sorted(unknown)}")
+    if set(extra) & names:
+        raise ValueError(
+            f"extra framings already computed: {sorted(set(extra) & names)}"
+        )
     return [
         (label, name, (camera, *map(float, fixed[name])), "")
         if name in fixed
         else (label, name, f, p)
         for label, name, f, p in items
+    ] + [
+        (name.replace("-", "_"), name, (camera, *map(float, f)), "")
+        for name, f in extra.items()
     ]
 
 
@@ -496,7 +517,7 @@ def framing_files(
         Names ``cour_01_Thomas_Mathieu_t0100.jpg``: with several times, the pictures of
         a framing follow one another (Fanfan: 5 times, easier to judge).
     **kwargs
-        Options of :func:`interval_framings` (``fixed`` included).
+        Options of :func:`interval_framings` (``fixed`` and ``extra`` included).
 
     Returns
     -------
@@ -518,10 +539,13 @@ def framing_files(
         max_zoom=2.4,
     )
     fixed = kwargs.pop("fixed", None)
+    extra = kwargs.pop("extra", None)
     opts.update(kwargs)
     items = [
         (label, f, problem)
-        for label, _, f, problem in _fix(_decide(people, camera, **opts), fixed, camera)
+        for label, _, f, problem in _fix(
+            _decide(people, camera, **opts), fixed, camera, extra
+        )
     ]
     img = _picture(video, time) if picture is None else picture
     dst = Path(dst)

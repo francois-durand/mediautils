@@ -41,6 +41,7 @@ from mediautils.montage import MltClock as MltClock
 from mediautils.montage import nervous_shots as nervous_shots
 from mediautils.montage import resync_project as resync_project
 from mediautils.montage import SyncProject as SyncProject
+from mediautils.montage import steady_beats as steady_beats
 from mediautils.montage import timeline_beats as timeline_beats
 from mediautils.montage import trim_project_end as trim_project_end
 from mediautils.montage import trim_project_head as trim_project_head

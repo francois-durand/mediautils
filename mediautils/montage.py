@@ -516,11 +516,111 @@ def contact_sheets(
     return out
 
 
-def timeline_beats(project: SyncProject, sample_rate: int = 22050) -> np.ndarray:
+def steady_beats(
+    envelope,
+    rate: float,
+    period: float,
+    stiffness: float = 30000.0,
+    spread: float = 0.25,
+) -> np.ndarray:
+    """Beats locally regular, on the attacks of an onset envelope.
+
+    Dynamic programming over (beat, previous beat): each beat scores the envelope at its
+    frame, and pays ``stiffness * log(d / d_prev) ** 2`` when its distance `d` to the
+    previous beat differs from the previous distance `d_prev`. The tempo may drift
+    slowly over the song (a band slowing down or speeding up), not jump from a beat to
+    the next: a syncopated attack (on the off-beat, on the last sixteenth) does not pull
+    a beat off the grid. librosa's ``beat_track`` keeps one tempo for the whole song,
+    on a coarse grid of tempi (steps of ~5 % at 130 bpm with its default hop), and still
+    followed the syncopations of Wish you were here (an extra beat in a 10-bar intro).
+
+    Parameters
+    ----------
+    envelope : array-like
+        Onset strength, one value per frame (e.g. ``librosa.onset.onset_strength``,
+        normalized).
+    rate : float
+        Frames per second.
+    period : float
+        Rough beat period (seconds), e.g. from ``librosa.feature.tempo``.
+    stiffness : float
+        Cost of a change of distance between successive beats: 30000 costs about 3 for a
+        change of 1 %, the height of a clear attack in a normalized envelope (chosen on
+        the five songs of the Burlingue 2026, against their validated grids).
+    spread : float
+        Distances between beats allowed: from ``period / (1 + spread)`` to
+        ``period * (1 + spread)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Beat times (seconds).
+
+    Examples
+    --------
+    An attack on every beat (0.5 s) and a syncopated one on the last sixteenth of
+    every second beat: the beats stay on the grid.
+
+        >>> env = np.zeros(800)
+        >>> env[50::50] = 1.0
+        >>> env[87::100] = 1.5
+        >>> b = steady_beats(env, rate=100, period=0.47)
+        >>> b.tolist()
+        [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5]
+    """
+    env = np.asarray(envelope, float)
+    ds = np.arange(
+        int(period * rate / (1 + spread)),
+        int(np.ceil(period * rate * (1 + spread))) + 1,
+    )
+    penalty = (
+        -stiffness * np.log(ds[:, None] / ds[None, :]) ** 2
+    )  # [distance, previous distance]
+    score = np.full((len(env), len(ds)), -np.inf)
+    back = np.full((len(env), len(ds)), -1)
+    for t in range(len(env)):
+        ok = t - ds >= 0
+        score[t] = env[t]  # a first beat
+        if ok.any():
+            prev = score[t - ds[ok]] + penalty[ok]
+            j = np.argmax(prev, axis=1)
+            best = prev[np.arange(len(j)), j]
+            go_on = (
+                best > 0
+            )  # else the beats start again here (after a silence, a break)
+            score[t, ok] += np.where(go_on, best, 0.0)
+            back[t, np.flatnonzero(ok)[go_on]] = j[go_on]
+    t = len(env) - 1 - int(np.argmax(score[::-1][: ds[-1]].max(axis=1)))
+    d = int(np.argmax(score[t]))
+    out = [t]
+    while back[t, d] >= 0:
+        t, d = t - ds[d], back[t, d]
+        out.append(t)
+    return np.array(out[::-1]) / rate
+
+
+def timeline_beats(
+    project: SyncProject,
+    sample_rate: int = 22050,
+    steady: bool = True,
+    stiffness: float = 30000.0,
+) -> np.ndarray:
     """Beats of the song (seconds of timeline), from the soundtrack of the cameras.
 
     Requires ffmpeg and librosa (extra ``concert``). The soundtrack is the
     reference camera where it films, else the other one.
+
+    Parameters
+    ----------
+    project : SyncProject
+        The synchronization project.
+    sample_rate : int
+        Sample rate of the soundtrack analysed.
+    steady : bool
+        Beats locally regular (:func:`steady_beats`, with `stiffness`); False: librosa's
+        ``beat_track`` (used up to October 2026), which follows the syncopations.
+    stiffness : float
+        See :func:`steady_beats`.
     """
     import librosa
 
@@ -553,8 +653,16 @@ def timeline_beats(project: SyncProject, sample_rate: int = 22050) -> np.ndarray
             x = np.frombuffer(raw, np.float32)
             a = int(s / project.fps * sample_rate)
             y[a : a + len(x)] = x[: len(y) - a]
-    _, b = librosa.beat.beat_track(y=y, sr=sample_rate, tightness=100)
-    return librosa.frames_to_time(b, sr=sample_rate)
+    if not steady:
+        _, b = librosa.beat.beat_track(y=y, sr=sample_rate, tightness=100)
+        return librosa.frames_to_time(b, sr=sample_rate)
+    hop = 128  # frames of 6 ms: fine distances between beats
+    env = librosa.onset.onset_strength(y=y, sr=sample_rate, hop_length=hop)
+    env = env / env.std()
+    period = 60 / float(
+        librosa.feature.tempo(onset_envelope=env, sr=sample_rate, hop_length=hop)[0]
+    )
+    return steady_beats(env, sample_rate / hop, period, stiffness)
 
 
 # --------------------------------------------------------------------------------------------------

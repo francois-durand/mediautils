@@ -1297,10 +1297,13 @@ def export_project(
     dst: str | os.PathLike,
     melt: str | os.PathLike = r"C:\Program Files\Shotcut\melt.exe",
     crf: int = 23,
+    start: int = 0,
 ) -> None:
     """Render a Shotcut project to an MP4 with melt (Shotcut's engine), as Shotcut would.
 
     Default quality = Shotcut's default (quality 55 %, i.e. x264 crf 23), AAC 384 kb/s.
+    `start`: first frame rendered (cuts the head of the song at export only, so that the markers of the project
+    stay on the bar grid, which :func:`trim_project_head` would not keep).
     """
     dst = Path(dst)
     if dst.exists():
@@ -1310,6 +1313,7 @@ def export_project(
             str(melt),
             "-quiet",
             str(project),
+            *([f"in={start}"] if start else []),
             "-consumer",
             f"avformat:{dst}",
             "f=mp4",

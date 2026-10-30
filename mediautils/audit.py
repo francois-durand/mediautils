@@ -58,6 +58,11 @@ def _visible(montage):
     P = SyncProject(montage)
     root = ET.parse(montage).getroot()
     C = _clock_of(root)
+    prof = root.find("profile")
+    C.size = (
+        int(prof.get("width")),
+        int(prof.get("height")),
+    )  # pixels of the zoom rects
     by_id = {el.get("id"): el for el in root}
     main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")
     tracks = []  # bottom to top: list of (start, end, label, chain, in, pos)
@@ -94,13 +99,23 @@ def _visible(montage):
 
 
 def _crop(chain, k, C):
-    """ffmpeg crop of the Shotcut "Size, Position & Rotate" filter of `chain` at frame `k` of the source."""
+    """ffmpeg crop of the Shotcut "Size, Position & Rotate" filter of `chain` at frame `k` of the source.
+
+    Given as fractions of the source size (``iw``, ``ih``): right whatever the resolution of the source.
+    """
     r = _crop_rect(chain, k, C)
-    return "null" if r is None else "crop={2:.0f}:{3:.0f}:{0:.0f}:{1:.0f}".format(*r)
+    if r is None:
+        return "null"
+    x, y, w, h = r
+    return f"crop=iw*{w:.6f}:ih*{h:.6f}:iw*{x:.6f}:ih*{y:.6f}"
 
 
 def _crop_rect(chain, k, C):
-    """Part of the 1920x1080 source shown by `chain` at its frame `k`: ``(x0, y0, w, h)``, or ``None`` (all)."""
+    """Part of the source shown by `chain` at its frame `k`, as fractions of the picture: ``(x0, y0, w, h)``,
+    or ``None`` (all).
+
+    The rect of the filter is in pixels of the project's profile (``C.size``: 1920x1080, 3840x2160...),
+    whatever the resolution of the source."""
     filt = next(
         (f for f in chain.findall("filter") if _prop(f, "mlt_service") == "affine"),
         None,
@@ -121,8 +136,8 @@ def _crop_rect(chain, k, C):
         x, y, w, h = [a + (b - a) * u for a, b in zip(r0[:4], r1[:4])]
     else:
         x, y, w, h = [float(v) for v in rect.split()[:4]]
-    z = w / 1920
-    return (-x / z, -y / z, 1920 / z, 1080 / z)
+    W, H = C.size
+    return (-x / w, -y / h, W / w, H / h)
 
 
 def audit_headroom(
@@ -219,7 +234,8 @@ def audit_headroom(
                     faces += [(960 - x - w, y, w, h) for x, y, w, h in flipped]
             # the zoom of the shot (fixed zooms; for a progressive one, its state at the nearest frame)
             k_rect = min(max(n, a), b - 1) - pos + i0
-            x0, y0, cw, ch = _crop_rect(chain, k_rect, C) or (0, 0, W, H)
+            fx, fy, fw, fh = _crop_rect(chain, k_rect, C) or (0, 0, 1, 1)
+            x0, y0, cw, ch = fx * W, fy * H, fw * W, fh * H  # source pixels
             for x, y, w, h in faces:
                 x, y, w, h = x * f, y * f, w * f, h * f
                 cx = x + w / 2

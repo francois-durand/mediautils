@@ -38,6 +38,34 @@ def test_montage_shots(montage):
     assert round(shots[-1][1] * FPS) == round(40 * FPS)
 
 
+@pytest.mark.parametrize("width,height", [(1920, 1080), (3840, 2160)])
+def test_crop_whatever_the_profile(tmp_path, width, height):
+    # a zoom x2 centred in the picture shows its middle quarter, in a 1080p project as in a 4K one (the rects
+    # of a 4K project are in 4K pixels; the crop is given as fractions of the source, whatever its size)
+    from mediautils.audit import _crop, _visible
+
+    p = make_sync_project(tmp_path / "p.mlt")
+    p.write_text(
+        p.read_text(encoding="utf-8").replace(
+            'width="1920" height="1080"', f'width="{width}" height="{height}"'
+        ),
+        encoding="utf-8",
+    )
+    build_montage(
+        SyncProject(p),
+        [(0, "A"), (5, "zL")],
+        {"zL": ("L", 960, 540, 2.0)},
+        [],
+        tmp_path / "m.mlt",
+        cut_end=10.0,
+    )
+    C, pieces = _visible(tmp_path / "m.mlt")
+    _, _, _, chain, i0, _ = next(p for p in pieces if p[2] == "zL")
+    assert _crop(chain, i0, C) == (
+        "crop=iw*0.500000:ih*0.500000:iw*0.250000:ih*0.250000"
+    )
+
+
 def test_vocal_entries(tmp_path):
     sr = 1000
     x = np.zeros(10 * sr)

@@ -373,6 +373,101 @@ class BarGrid:
         return bool(np.min(abs(self.downbeats() - time)) <= tolerance)
 
 
+class MeterGrid(BarGrid):
+    """Beats grouped into bars of varying length (e.g. 6/8 bars with a few 3/8 and 9/8).
+
+    Same interface as :class:`BarGrid` (:meth:`label`, :meth:`time`, :meth:`downbeats`).
+
+    Parameters
+    ----------
+    beats : array-like
+        Every beat (seconds).
+    meters : list[int]
+        Number of beats of each bar, from bar `bar` on.
+    index : int
+        Position in `beats` of the first beat of bar `bar`.
+    bar : int
+        Number of the first bar.
+
+    Examples
+    --------
+        >>> g = MeterGrid([0, 1, 2, 3, 4, 5, 6, 7], [2, 1, 3], index=1)
+        >>> [g.label(i) for i in range(8)]
+        [(0, 0), (1, 1), (1, 2), (2, 1), (3, 1), (3, 2), (3, 3), (4, 1)]
+        >>> g.time(2), g.time(3, 2.5), g.time(4)
+        (3.0, 5.5, 7.0)
+        >>> g.downbeats().tolist()
+        [1.0, 3.0, 4.0, 7.0]
+    """
+
+    def __init__(self, beats, meters, index: int = 0, bar: int = 1):
+        self.beats = np.asarray(beats, float)
+        self.meters = list(meters)
+        self.index, self.first = index, bar
+        self.starts = np.concatenate([[0], np.cumsum(self.meters)]).astype(int)
+
+    def label(self, i: int) -> tuple[int, int]:
+        """``(bar, beat)`` of ``beats[i]``: ``(bar - 1, 0)`` before the grid; after the
+        last bar, one long bar."""
+        k = i - self.index
+        if k < 0:
+            return self.first - 1, 0
+        j = min(
+            int(np.searchsorted(self.starts, k, side="right")) - 1, len(self.meters)
+        )
+        return self.first + j, k - int(self.starts[j]) + 1
+
+    def time(self, bar: int, beat: float = 1.0) -> float:
+        """Time of a beat (a fractional beat is interpolated); the bar after the last one
+        may be asked (its 1 = the end of the grid)."""
+        j = bar - self.first
+        if j < 0 or j > len(self.meters):
+            raise IndexError(f"beat {bar}.{beat} outside the grid")
+        k = self.index + int(self.starts[j]) + int(beat) - 1
+        frac = beat - int(beat)
+        t = self.beats[k]
+        return float(t + frac * (self.beats[k + 1] - t)) if frac else float(t)
+
+    @classmethod
+    def from_marks(
+        cls,
+        marks: list[tuple[float, list[int]]],
+        end: float,
+        detected=None,
+        reach: float = 0.15,
+    ) -> "MeterGrid":
+        """Grid from the user's section markers: ``(start, meters)`` each, in order.
+
+        The beats of each section are evenly spaced between its start and the next one
+        (`end` after the last), then, with `detected` beats, each inner beat is moved
+        onto the nearest detected beat within `reach` seconds (the section starts stay
+        where the user put them). An empty `meters` (free time: a held note) gives a
+        single beat.
+
+        Examples
+        --------
+            >>> g = MeterGrid.from_marks([(0.0, [2, 1]), (3.0, [2])], end=5.0, detected=[1.1, 3.9])
+            >>> g.beats.tolist(), g.meters, g.time(3)
+            ([0.0, 1.1, 2.0, 3.0, 3.9, 5.0], [2, 1, 2], 3.0)
+        """
+        beats, meters = [], []
+        for (a, m), (b, _) in zip(marks, marks[1:] + [(end, [])]):
+            n = sum(m) or 1
+            beats.extend(np.linspace(a, b, n, endpoint=False))
+            meters.extend(m or [1])
+        beats = np.array(beats + [end])
+        if detected is not None and len(detected):
+            d = np.sort(np.asarray(detected, float))
+            fixed = {float(a) for a, _ in marks} | {float(end)}
+            for i, t in enumerate(beats):
+                if float(t) in fixed:
+                    continue
+                k = int(np.argmin(abs(d - t)))
+                if abs(d[k] - t) <= reach:
+                    beats[i] = d[k]
+        return cls(beats, meters)
+
+
 def numbered_beat_markers(path: str | os.PathLike, beats) -> None:
     """One marker per beat, numbered from 1, in a Shotcut project (in place).
 

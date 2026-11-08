@@ -29,11 +29,18 @@ The alarms (:func:`shot_alarms`), on the pictures of each shot (named keypoints 
 - **chaining**: two framings too close in a row (same people and a zoom ratio under 1.4,
   or overlapping by more than half); going back to a wider framing of the same people;
 - **cuts**: a cut in the middle of a phrase of the singer without a breath nor an accent
-  to justify it; a cut far from any attack.
+  to justify it; a cut far from any attack;
+- **short shots**: does such a shot make sense?
 
 The margins are judged on the whole picture with the frame drawn, not only on the
 cropped picture (a check of the people cut only had let through a wide shot too empty on
 the right, *C'est comme ça*, 2026-11-05): :func:`draw_frame`.
+
+**Each alarm is looked at on its own picture**, at the moment where it is worst
+(:func:`alarm_pictures`), and decided one by one. *People have the power* (v09,
+2026-11-08): decisions written per type of alarm by a script, on two thumbnails per shot
+taken at its start and middle, let through Fanfan pressed against the edge of the frame
+of the presentation and Mathieu's hand cut, while both alarms had sounded.
 """
 
 import os
@@ -117,6 +124,10 @@ class Thresholds:
         An accent within this of a cut justifies it (seconds).
     attack : float
         A cut further than this from any attack (seconds).
+    short : float
+        A shot shorter than this (seconds) is flagged: does it make sense? (*People have
+        the power*, 2026-11-08: a shot of 0.9 s kept from an older version, « je ne
+        comprends pas l'intérêt de ce micro-plan ».)
     """
 
     head_top: float = 0.06
@@ -136,11 +147,15 @@ class Thresholds:
     phrase: float = 0.15
     accent: float = 0.08
     attack: float = 0.15
+    short: float = 1.5
 
 
 @dataclass
 class Alarm:
-    """An alarm on a shot (or on a cut, `start` = `end`)."""
+    """An alarm on a shot (or on a cut, `start` = `end`).
+
+    `pictures` are the times of the pictures where the problem holds, `badness` how bad
+    it is on each (larger = worse): :attr:`worst` is the picture to look at."""
 
     start: float
     end: float
@@ -148,6 +163,32 @@ class Alarm:
     kind: str
     message: str
     pictures: list[float] = field(default_factory=list)
+    badness: list[float] = field(default_factory=list)
+
+    @property
+    def worst(self) -> float:
+        """Time of the picture where the problem is worst (the middle of the shot, or the
+        cut, if the alarm has no picture).
+
+        >>> Alarm(0, 4, "Fanfan", "marge", "Fanfan décentré", [1.0, 1.5, 2.0], [0.13, 0.31, 0.2]).worst
+        1.5
+        >>> Alarm(0, 4, "Fanfan", "plan", "plan court").worst
+        2.0
+        """
+        if self.pictures and len(self.badness) == len(self.pictures):
+            return self.pictures[int(np.argmax(self.badness))]
+        if self.pictures:
+            return self.pictures[len(self.pictures) // 2]
+        return (self.start + self.end) / 2
+
+
+def _badness(msg: str, v: float) -> float:
+    """How bad a problem of a picture is, from its value (larger = worse)."""
+    if "bord haut" in msg:
+        return -v  # the higher the head, the worse
+    if "coupé par un bord" in msg:
+        return 0.5 - abs(v - 0.5)  # cut in the middle is the worst
+    return abs(v)
 
 
 def clock(t: float) -> str:
@@ -407,18 +448,35 @@ def shot_alarms(
             for n in guitarists:
                 if n in wanted and n in boxes:
                     kp = boxes[n][4]
-                    if any(
-                        seen(kp, i)
+                    hand = 1.5 * head_scale(kp)  # the hand goes on below the wrist
+                    out = [
+                        (kp[i][1] + hand - rect[3]) / (rect[3] - rect[1])
+                        for i in WRISTS
+                        if seen(kp, i)
                         and not (
                             rect[0] <= kp[i][0] <= rect[2]
-                            and rect[1] <= kp[i][1] <= rect[3]
+                            and rect[1] <= kp[i][1] + hand <= rect[3]
                         )
-                        for i in WRISTS
-                    ):
-                        probs.append(("instrument", f"mains de {n} hors du cadre", 0.0))
+                    ]
+                    if out:
+                        probs.append(
+                            ("instrument", f"mains de {n} hors du cadre", max(out))
+                        )
             for kind, msg, v in probs:
-                found.setdefault((kind, msg), []).append(v)
+                found.setdefault((kind, msg), []).append(_badness(msg, v))
                 pics.setdefault((kind, msg), []).append(float(times[k]))
+        if end - start < th.short:
+            alarms.append(
+                Alarm(
+                    start,
+                    end,
+                    name,
+                    "plan",
+                    f"plan court ({end - start:.1f} s) : a-t-il un sens ?".replace(
+                        ".", ","
+                    ),
+                )
+            )
         for (kind, msg), vs in found.items():
             if len(vs) >= max(1, th.share * len(ks)):
                 share = len(vs) / len(ks)
@@ -430,19 +488,29 @@ def shot_alarms(
                         kind,
                         f"{msg} ({share:.0%} des images)",
                         pics[kind, msg],
+                        vs,
                     )
                 )
         for n in wanted:  # moved from their usual place
-            xs = [shoulders_x(p["kp"]) for k in ks if (p := who(frames[k], n))]
-            xs = [x for x in xs if x is not None]
-            if xs and n in usual and abs(np.median(xs) - usual[n]) / fw > th.moved:
+            xs = [
+                (float(times[k]), shoulders_x(p["kp"]))
+                for k in ks
+                if (p := who(frames[k], n))
+            ]
+            xs = [(t, x) for t, x in xs if x is not None]
+            if not xs or n not in usual:
+                continue
+            shift = np.median([x for _, x in xs]) - usual[n]
+            if abs(shift) / fw > th.moved:
                 alarms.append(
                     Alarm(
                         start,
                         end,
                         name,
                         "musicien",
-                        f"{n} s'est déplacé ({np.median(xs) - usual[n]:+.0f} px)",
+                        f"{n} s'est déplacé ({shift:+.0f} px)",
+                        [t for t, _ in xs],
+                        [abs(x - usual[n]) for _, x in xs],
                     )
                 )
         for thing, (owner, (x0, y0, x1, y1)) in (fixed or {}).items():
@@ -638,12 +706,14 @@ def alarm_log(
     if path.exists() and not overwrite:
         raise FileExistsError(path)
     lines = [
-        "| Heure | Plan | Alarme | Décision | Pourquoi |",
-        "|---|---|---|---|---|",
+        "| # | Heure | Plan | Alarme | Image | Décision | Pourquoi |",
+        "|---|---|---|---|---|---|---|",
     ]
-    for a in alarms:
+    for k, a in enumerate(alarms, 1):
         where = clock(a.start) + (f", {locate(a.start)}" if locate else "")
-        lines.append(f"| {where} | {a.shot} | {a.kind} : {a.message} |  |  |")
+        lines.append(
+            f"| {k} | {where} | {a.shot} | {a.kind} : {a.message} | {clock(a.worst)} |  |  |"
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -659,9 +729,20 @@ def draw_frame(
     picture, named). For Claude's checks only."""
     import cv2
 
-    from mediautils.pose import SKELETON, read_image
+    from mediautils.pose import read_image
 
-    img = read_image(image)
+    img = _drawn(read_image(image), framing, frame)
+    dst = Path(dst)
+    cv2.imencode(dst.suffix or ".jpg", img)[1].tofile(str(dst))
+    return dst
+
+
+def _drawn(img, framing, frame=None):
+    """`img` with the frame and the named skeletons drawn on it."""
+    import cv2
+
+    from mediautils.pose import SKELETON
+
     sx, sy = img.shape[1] / W, img.shape[0] / H
     x0, y0, x1, y1 = framing_rect(framing)
     cv2.rectangle(
@@ -693,6 +774,107 @@ def draw_frame(
                 col,
                 2,
             )
-    dst = Path(dst)
-    cv2.imencode(dst.suffix or ".jpg", img)[1].tofile(str(dst))
-    return dst
+    return img
+
+
+def alarm_pictures(
+    alarms: list[Alarm],
+    framings: dict[str, tuple],
+    frames: list[dict],
+    images: list[str | os.PathLike],
+    out_dir: str | os.PathLike,
+    offset: float = 0.0,
+    per_sheet: int = 4,
+    width: int = 960,
+    only: set[int] | None = None,
+) -> list[Path]:
+    """The pictures to decide the alarms on, one by one: for each alarm, the whole picture
+    with the frame of its shot drawn (and the named skeletons), at its :attr:`Alarm.worst`
+    moment; for an alarm on a cut, the picture just before it with the frame of the shot
+    before, and the one just after it with the frame of the shot after. Each picture is
+    captioned with the numbers of its alarms (the rows of :func:`alarm_log`); alarms of a
+    shot that fall on the same picture share it. For Claude's checks only.
+
+    Parameters
+    ----------
+    alarms : list[Alarm]
+        From :func:`shot_alarms`, in the order of the log.
+    framings : dict[str, tuple]
+        The framings of the shots.
+    frames : list[dict]
+        Named keypoints, one per picture of the rush.
+    images : list
+        The pictures of the rush, in the same order as `frames`.
+    out_dir : str | os.PathLike
+        Folder of the sheets (``alarmes_NN.jpg``, previous sheets removed).
+    offset : float
+        Time of the montage = time of the pictures + `offset`.
+    per_sheet : int
+        Pictures per sheet (2 per row).
+    width : int
+        Width of each picture on the sheet.
+    only : set[int], optional
+        Numbers of the alarms to draw (the rows of the log), e.g. those of the shots changed
+        since the last round: the back-and-forth stays light.
+
+    Returns
+    -------
+    list[Path]
+        The sheets.
+    """
+    import cv2
+
+    from mediautils.pose import read_image
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for p in out_dir.glob("alarmes_*.jpg"):
+        p.unlink()
+    times = np.array([f["t"] + offset for f in frames])
+
+    def index(t):
+        return int(np.argmin(np.abs(times - t)))
+
+    cells = {}  # (shot, picture) -> list of captions
+    for no, a in enumerate(alarms, 1):
+        if only is not None and no not in only:
+            continue
+        if a.start == a.end and " -> " in a.shot:
+            before, after = a.shot.split(" -> ", 1)
+            keys = [(before, index(a.start - 0.4)), (after, index(a.start + 0.4))]
+        else:
+            keys = [(a.shot, index(a.worst))]
+        for key in keys:
+            cells.setdefault(key, []).append(f"#{no} {a.kind} : {a.message}")
+    height = width * H // W
+    pics = []
+    for (shot, k), captions in cells.items():
+        img = read_image(images[k])
+        framing = framings.get(shot, ("?", W / 2, H / 2, 1.0))
+        img = cv2.resize(_drawn(img, framing, frames[k]), (width, height))
+        lines = [f"{clock(times[k])}  {shot}"] + captions
+        cv2.rectangle(img, (0, 0), (width, 8 + 22 * len(lines)), (0, 0, 0), -1)
+        for i, line in enumerate(lines):
+            cv2.putText(
+                img,
+                line[:90],
+                (6, 22 + 22 * i),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+        pics.append(img)
+    sheets = []
+    for s in range(0, len(pics), per_sheet):
+        group = pics[s : s + per_sheet]
+        while len(group) % 2:
+            group.append(np.zeros_like(pics[0]))
+        sheet = np.vstack(
+            [np.hstack(group[j : j + 2]) for j in range(0, len(group), 2)]
+        )
+        dst = out_dir / f"alarmes_{s // per_sheet + 1:02d}.jpg"
+        cv2.imencode(".jpg", sheet, [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tofile(str(dst))
+        sheets.append(dst)
+    return sheets

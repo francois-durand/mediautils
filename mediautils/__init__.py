@@ -4,6 +4,7 @@ from importlib.metadata import metadata
 
 from mediautils.alarms import Alarm as Alarm
 from mediautils.alarms import alarm_log as alarm_log
+from mediautils.alarms import alarm_pictures as alarm_pictures
 from mediautils.alarms import catalogue_alarms as catalogue_alarms
 from mediautils.alarms import draw_frame as draw_frame
 from mediautils.alarms import shot_alarms as shot_alarms
@@ -21,6 +22,7 @@ from mediautils.audit import vocal_entries as vocal_entries
 from mediautils.catalogue import catalogue as catalogue
 from mediautils.catalogue import Extent as Extent
 from mediautils.catalogue import framing_rect as framing_rect
+from mediautils.catalogue import hand_bottom as hand_bottom
 from mediautils.catalogue import intended as intended
 from mediautils.catalogue import Place as Place
 from mediautils.catalogue import usual_places as usual_places

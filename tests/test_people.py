@@ -15,6 +15,7 @@ from mediautils import (
     Thresholds,
     Zone,
     alarm_log,
+    alarm_pictures,
     catalogue,
     catalogue_alarms,
     detect_poses,
@@ -499,8 +500,8 @@ def test_alarm_log_and_draw(tmp_path, pictures):
     )
     text = log.read_text(encoding="utf-8")
     assert (
-        "| 2:20,8, mesure 61, couplet 2 | Fanfan | tête : tête de Fanfan trop près du bord haut |  |  |"
-        in text
+        "| 1 | 2:20,8, mesure 61, couplet 2 | Fanfan | tête : tête de Fanfan trop près du bord haut"
+        " | 2:22,9 |  |  |" in text
     )
     with pytest.raises(FileExistsError):
         alarm_log(alarms, log)
@@ -509,3 +510,24 @@ def test_alarm_log_and_draw(tmp_path, pictures):
     frame = {"people": [{**body(500), "name": "T"}, body(1500)]}
     dst = draw_frame(pictures[0], ("L", 960, 540, 2.0), tmp_path / "cadre.jpg", frame)
     assert read_image(dst).shape == (1080, 1920, 3)
+
+
+def test_alarm_pictures_and_short_shots(tmp_path, pictures):
+    frames = [
+        {"t": k / 2, "people": [{**body(500), "name": "T"}]}
+        for k in range(len(pictures))
+    ]
+    z = {"T": ("L", 500, 450, 2.0), "large": ("L", 960, 540, 1.0)}
+    alarms = shot_alarms([(0, 0.5, "large"), (0.5, 1.5, "T")], z, frames, ["T"])
+    short = [a for a in alarms if a.kind == "plan"]
+    assert [a.message for a in short] == [
+        "plan court (0,5 s) : a-t-il un sens ?",
+        "plan court (1,0 s) : a-t-il un sens ?",
+    ]
+    cut = Alarm(0.5, 0.5, "large -> T", "coupe", "coupe loin de toute attaque")
+    sheets = alarm_pictures(alarms + [cut], z, frames, pictures, tmp_path / "planches")
+    assert len(sheets) == 1 and read_image(sheets[0]).shape == (540, 1920, 3)
+    sheets = alarm_pictures(
+        alarms, z, frames, pictures, tmp_path / "planches", only={2}
+    )
+    assert len(sheets) == 1

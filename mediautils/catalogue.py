@@ -37,7 +37,16 @@ import numpy as np
 
 from mediautils.framing import Person
 from mediautils.identify import who
-from mediautils.pose import WRISTS, HIPS, body_box, eyes_y, head_top, seen, shoulders_x
+from mediautils.pose import (
+    HIPS,
+    WRISTS,
+    body_box,
+    eyes_y,
+    head_scale,
+    head_top,
+    seen,
+    shoulders_x,
+)
 
 W, H = 1920, 1080
 TIGHT = "serré"
@@ -72,10 +81,27 @@ class Extent:
 @dataclass
 class Place(Person):
     """Usual place of a musician (:func:`usual_places`): a :class:`~mediautils.framing.Person`
-    whose `bottom` includes the instrument (:class:`Extent`), and `hands` the height of
-    the lowest hand (what the tight shots of an instrumentalist keep)."""
+    whose `bottom` includes the instrument (:class:`Extent`), and `hands` the bottom of
+    the lowest hand, as low as it usually goes (what the tight shots of an
+    instrumentalist keep: :func:`hand_bottom`)."""
 
     hands: float | None = None
+
+
+def hand_bottom(kp: list) -> float | None:
+    """Bottom of the lowest hand (pixels): the keypoint is the wrist, the hand goes on
+    below it (taken as 1.5 half-widths of the head). None if no wrist is seen.
+
+    *People have the power* (Burlingue, 2026-11-08): tight shots that kept the wrists
+    only cut Mathieu's strumming hand.
+
+        >>> kp = [[0, 0, 0]] * 5 + [[400, 400, 0.9], [600, 400, 0.9]] + [[0, 0, 0]] * 2
+        >>> kp += [[390, 600, 0.9], [610, 640, 0.9]] + [[0, 0, 0]] * 6
+        >>> hand_bottom(kp)
+        715.0
+    """
+    ys = [kp[i][1] for i in WRISTS if seen(kp, i)]
+    return max(ys) + 1.5 * head_scale(kp) if ys else None
 
 
 def _mode(xs, spread):
@@ -159,19 +185,22 @@ def usual_places(
             x, box, top, e = shoulders_x(kp), body_box(kp), head_top(kp), eyes_y(kp)
             if x is None or box is None or top is None:
                 continue
-            hands = [kp[i][1] for i in WRISTS if seen(kp, i)]
+            hand = hand_bottom(kp)
             low = (
-                max(hands)
-                if hands
-                else max([kp[i][1] for i in HIPS if seen(kp, i)] or [box[3]])
+                [kp[i][1] for i in WRISTS if seen(kp, i)]
+                or [kp[i][1] for i in HIPS if seen(kp, i)]
+                or [box[3]]
             )
-            rows.append((x, box[0], box[2], top, e, low))
+            rows.append((x, box[0], box[2], top, e, max(low), hand or np.nan))
         if not rows:
             continue
         rows = np.array(rows, dtype=float)
         mode = _mode(rows[:, 0], spread)
         rows = rows[np.abs(rows[:, 0] - mode) <= spread]
-        x, x0, x1, top, e, low = np.median(rows, axis=0)
+        x, x0, x1, top, e, low = np.median(rows[:, :6], axis=0)
+        # the hands: as low as they usually go (a strumming hand moves), not the median
+        hands = rows[:, 6][~np.isnan(rows[:, 6])]
+        hand = float(np.percentile(hands, 90)) if len(hands) else float(low)
         ext = extend.get(name, Extent())
         out[name] = (
             x,
@@ -183,7 +212,7 @@ def usual_places(
                 bottom=float(low + ext.below),
                 alone=None if ext.alone is None else float(low + ext.alone),
                 tight_hands=ext.tight_hands,
-                hands=float(low),
+                hands=hand,
             ),
         )
     return {n: p for n, (_, p) in sorted(out.items(), key=lambda item: item[1][0])}

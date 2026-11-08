@@ -34,7 +34,7 @@ from mediautils import (
 )
 from mediautils.alarms import clock, plan
 from mediautils.identify import gaze_series, swap_names, who
-from mediautils.pose import body_box, head_top, read_image
+from mediautils.pose import _unmirror, body_box, head_top, read_image
 
 
 def body(x, y=300, w=160, torso=300, feet=None, wrists=None, nose=0.9):
@@ -52,14 +52,15 @@ def body(x, y=300, w=160, torso=300, feet=None, wrists=None, nose=0.9):
 
 
 class Model:
-    """Stand-in for a YOLO model: returns the given detections (in the picture given)."""
+    """Stand-in for a YOLO model: returns the given detections, one list per call (the
+    last one again after)."""
 
-    def __init__(self, people):
-        self.people, self.calls = people, []
+    def __init__(self, *responses):
+        self.responses, self.calls = responses, []
 
     def predict(self, img, **kw):
         self.calls.append((img.shape, kw))
-        people = self.people
+        people = self.responses[min(len(self.calls), len(self.responses)) - 1]
 
         class R:
             class boxes:
@@ -133,14 +134,24 @@ def test_detect_and_second_pass(pictures, tmp_path):
         "kp": [[x - 1100, y - 200, c] for x, y, c in b["kp"]],
     }
     crop_a = {"box": a["box"], "kp": [[x - 1100, y - 200, c] for x, y, c in a["kp"]]}
-    model = Model([crop_a, crop_b])
+    model = Model([crop_a, crop_b], [])
     more = second_pass(frames, pictures, [1], (1100, 200, 1920, 1080), model=model)
     assert len(frames[1]["people"]) == 1  # not modified
     assert len(more[1]["people"]) == 2 and more[1]["people"][1]["second_pass"]
     assert more[1]["people"][1]["kp"][5][0] == b["kp"][5][0]
-    assert model.calls[0][0][:2] == (880, 820) and model.calls[0][1]["augment"]
+    assert [c[0][:2] for c in model.calls] == [
+        (880, 820),
+        (880, 820),
+    ]  # the crop, then mirrored
     save_poses(more, tmp_path / "pose.json")
     assert load_poses(tmp_path / "pose.json") == more
+    # found in the mirrored crop only: put back in place, left and right swapped back
+    mirrored = _unmirror(crop_b, 820, 0)
+    more = second_pass(
+        frames, pictures, [1], (1100, 200, 1920, 1080), model=Model([], [mirrored])
+    )
+    found = more[1]["people"][1]
+    assert found["kp"][5][:2] == b["kp"][5][:2] and found["kp"][6][:2] == b["kp"][6][:2]
 
 
 def test_keypoint_helpers():

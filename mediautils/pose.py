@@ -10,9 +10,9 @@ On these pictures, YOLO pose (:func:`detect_poses`, model ``yolo11m-pose.pt``) g
 wrists, hips, knees, ankles, each ``[x, y, confidence]``. They are well placed even
 when the musicians overlap; but YOLO loses a person standing behind another one. A
 **second pass** (:func:`second_pass`) finds them back: the same picture is given again,
-cut to the region where they overlap (YOLO then sees them bigger) and mirrored (test-time
-augmentation). On *Sarbacane* (Burlingue, June 2026), it found back the 65 pictures out
-of 65 where Mathieu was missing.
+cut to the region where they overlap (YOLO then sees them bigger), and mirrored. On
+*Sarbacane* (Burlingue, June 2026), the crop alone found back the 65 pictures out of 65
+where Mathieu was missing.
 
 The top of the skull is not a keypoint: :func:`head_top` estimates it from the eyes,
 the ears and the nose.
@@ -299,8 +299,9 @@ def second_pass(
     """Second look for the people YOLO lost where two of them overlap.
 
     The pictures `which` are given again to YOLO cut to `region` (the overlap, with
-    some room: the person is then bigger in what YOLO sees) and mirrored too
-    (``augment=True``). The bodies found that are not already in the picture
+    some room: the person is then bigger in what YOLO sees), and that crop mirrored too
+    (done here: the ``augment`` option of ultralytics is not supported by its pose
+    models). The bodies found that are not already in the picture
     (:func:`same_body`) are added, marked ``"second_pass": True``. Who is who is decided
     afterwards (:func:`mediautils.identify.identify`).
 
@@ -331,8 +332,15 @@ def second_pass(
     x0, y0, x1, y1 = (int(round(v)) for v in region)
     for k in which:
         img = read_image(images[k])[y0:y1, x0:x1]
-        r = yolo.predict(img, conf=conf, imgsz=imgsz, augment=True, verbose=False)[0]
-        for p in _people(r, x0, y0):
+        w = img.shape[1]
+        found = _people(
+            yolo.predict(img, conf=conf, imgsz=imgsz, verbose=False)[0], x0, y0
+        )
+        mirror = yolo.predict(
+            img[:, ::-1].copy(), conf=conf, imgsz=imgsz, verbose=False
+        )[0]
+        found += [_unmirror(p, w, x0) for p in _people(mirror, 0, y0)]
+        for p in found:
             if min(p["kp"][5][2], p["kp"][6][2]) < SEEN:
                 continue
             if any(same_body(p["kp"], q["kp"]) for q in out[k]["people"]):
@@ -340,6 +348,22 @@ def second_pass(
             p["second_pass"] = True
             out[k]["people"].append(p)
     return out
+
+
+def _unmirror(p, w, dx):
+    """A detection in a mirrored crop of width `w`, back into the picture (crop at `dx`):
+    x flipped, and the left and right keypoints swapped back.
+
+        >>> kp = [[10 * i, i, 1.0] for i in range(17)]
+        >>> q = _unmirror({"box": [10, 0, 50, 100], "kp": kp}, 200, 1000)
+        >>> q["box"], q["kp"][0], q["kp"][1], q["kp"][2]
+        ([1150, 0, 1190, 100], [1200, 0, 1.0], [1180, 2, 1.0], [1190, 1, 1.0])
+    """
+    kp = [[dx + w - x, y, c] for x, y, c in p["kp"]]
+    for a in range(1, 17, 2):
+        kp[a], kp[a + 1] = kp[a + 1], kp[a]
+    b = p["box"]
+    return {"box": [dx + w - b[2], b[1], dx + w - b[0], b[3]], "kp": kp}
 
 
 def save_poses(frames: list[dict], path: str | os.PathLike) -> None:

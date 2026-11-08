@@ -22,6 +22,7 @@ from mediautils.catalogue import catalogue as catalogue
 from mediautils.catalogue import Extent as Extent
 from mediautils.catalogue import framing_rect as framing_rect
 from mediautils.catalogue import intended as intended
+from mediautils.catalogue import Place as Place
 from mediautils.catalogue import usual_places as usual_places
 from mediautils.catalogue import variant_name as variant_name
 from mediautils.framing import framing_files as framing_files

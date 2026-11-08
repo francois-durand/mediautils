@@ -69,6 +69,15 @@ class Extent:
     tight_hands: bool = True
 
 
+@dataclass
+class Place(Person):
+    """Usual place of a musician (:func:`usual_places`): a :class:`~mediautils.framing.Person`
+    whose `bottom` includes the instrument (:class:`Extent`), and `hands` the height of
+    the lowest hand (what the tight shots of an instrumentalist keep)."""
+
+    hands: float | None = None
+
+
 def _mode(xs, spread):
     """The value around which most of `xs` lie (densest window of width 2 * spread)."""
     xs = np.sort(np.asarray(xs, dtype=float))
@@ -86,8 +95,9 @@ def usual_places(
     spread: float = 60.0,
     since: float | None = None,
     until: float | None = None,
-) -> dict[str, Person]:
-    """Where each musician usually stands, as the box of :class:`~mediautils.framing.Person`.
+) -> dict[str, "Place"]:
+    """Where each musician usually stands, as the box of :class:`~mediautils.framing.Person`
+    (a :class:`Place`).
 
     For each person, the pictures where their shoulders are within `spread` pixels of
     the place where they stand most of the time; on these, the median of their body
@@ -165,7 +175,7 @@ def usual_places(
         ext = extend.get(name, Extent())
         out[name] = (
             x,
-            Person(
+            Place(
                 x0=float(x0 - ext.left),
                 x1=float(x1 + ext.right),
                 top=float(top),
@@ -173,6 +183,7 @@ def usual_places(
                 bottom=float(low + ext.below),
                 alone=None if ext.alone is None else float(low + ext.alone),
                 tight_hands=ext.tight_hands,
+                hands=float(low),
             ),
         )
     return {n: p for n, (_, p) in sorted(out.items(), key=lambda item: item[1][0])}
@@ -209,7 +220,7 @@ def catalogue(
     places: dict[str, Person],
     camera: str = "L",
     margin: float = 0.04,
-    headroom: float = 0.08,
+    headroom: float = 0.10,
     wide_margin: float = 0.03,
     tight: float = 1.45,
     very_tight: float = 1.45,
@@ -255,8 +266,12 @@ def catalogue(
 
     Examples
     --------
-        >>> places = {"A": Person(100, 500, 200, 260, 600), "B": Person(800, 1100, 250, 300, 650),
-        ...           "C": Person(1300, 1800, 200, 260, 700)}
+    Three singers (their tight shots need not keep their hands):
+
+        >>> def singer(x0, x1, top, eyes, bottom):
+        ...     return Person(x0, x1, top, eyes, bottom, tight_hands=False)
+        >>> places = {"A": singer(100, 500, 200, 260, 600), "B": singer(800, 1100, 250, 300, 650),
+        ...           "C": singer(1300, 1800, 200, 260, 700)}
         >>> z = catalogue(places)
         >>> len(z), list(z)[:6]
         (12, ['large', 'A-B', 'A', 'A serré', 'A très serré', 'B-C'])
@@ -264,13 +279,23 @@ def catalogue(
         >>> round(cx), round(zoom, 2), round(cy + 540 / zoom)  # the feet kept: down to the bottom
         (950, 1.06, 1080)
         >>> round(z["B serré"][3] / z["B"][3], 2), round(z["B très serré"][3] / z["B serré"][3], 2)
-        (1.45, 1.16)
+        (1.45, 1.19)
 
     The very tight shot of B is held back by the largest zoom (4 by default):
 
         >>> round(z["B très serré"][3], 2)
         4.0
         >>> framing_rect(z["B"])[1] < 250  # the head inside, with some air
+        True
+
+    An instrumentalist keeps both hands in his tight shots: when his place is only his
+    body down to the hands, they cannot be tighter (an alarm says so); with the guitar
+    below the hands (:func:`usual_places`, :class:`Extent`), they drop the guitar.
+
+        >>> z = catalogue({"G": Place(800, 1100, 250, 300, 800, hands=650)})
+        >>> round(z["G"][3], 2), round(z["G serré"][3], 2)
+        (1.69, 2.3)
+        >>> framing_rect(z["G serré"])[3] >= 650
         True
     """
     names = list(places)
@@ -296,11 +321,19 @@ def catalogue(
             out[name] = (camera, cx, cy, z)
         p = ps[i]
         z = out[names[i]][3]
+        # the tight shots of an instrumentalist keep both hands (quasi absolute, rule 3.4):
+        # they zoom in less if needed (and may then not be frankly tighter: an alarm says so)
+        hands = getattr(p, "hands", None)
+        low = (p.bottom if hands is None else hands) if p.tight_hands else None
         for word, factor in ((TIGHT, tight), (VERY_TIGHT, tight * very_tight)):
             zt = min(z * factor, max_zoom)
-            h = H / zt
+            while True:
+                h = H / zt
+                y0 = min(max(p.top - headroom * h, 0), H - h)
+                if low is None or y0 + h >= low + margin * h or zt <= z:
+                    break
+                zt = max(zt * 0.97, z)
             cx = min(max((p.x0 + p.x1) / 2, W / zt / 2), W - W / zt / 2)
-            y0 = min(max(p.top - headroom * h, 0), H - h)
             out[f"{names[i]} {word}"] = (
                 camera,
                 float(cx),

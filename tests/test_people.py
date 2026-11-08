@@ -412,6 +412,12 @@ def test_shot_alarms():
     )
     moved = shot_alarms([(4.0, 5.0, "T")], {"T": ("C", 900, 500, 1.5)}, moving, ["T"])
     assert any("déplacé" in a.message for a in moved)
+    # in a variant of the catalogue for that part (they stand elsewhere there), not moved
+    framings = {"T": ("C", 900, 500, 1.5), "T (fin)": ("C", 900, 500, 1.5)}
+    moved = shot_alarms(
+        [(4.0, 5.0, "T (fin)")], framings, moving, ["T"], variants={"fin": [(4.0, 5.0)]}
+    )
+    assert not any("déplacé" in a.message for a in moved)
 
 
 def test_shot_alarms_singer_at_the_edge():

@@ -37,6 +37,7 @@ the right, *C'est comme ça*, 2026-11-05): :func:`draw_frame`.
 """
 
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,7 +88,13 @@ class Thresholds:
     wide_side : float
         Margin of the wide shot on a side.
     cut : tuple[float, float]
-        An edge falls on someone between these shares of their width.
+        An edge falls on someone, who keeps between these shares of their width in the
+        frame.
+    cut_alone : tuple[float, float]
+        The same for a neighbour in a shot of one person: a small piece of them is
+        accepted (rule 3.1, « tant pis »); from a third, the intention of the shot gets
+        ambiguous (« le cul entre deux chaises »). Calibrated on *People have the power*
+        (2026-11-08), where the shots on Fanfan alone always showed a bit of Thomas.
     singer_edge : float
         The singer's head closer than this to a side edge.
     gaze : float
@@ -118,6 +125,7 @@ class Thresholds:
     alone_offset: float = 0.12
     wide_side: float = 0.06
     cut: tuple[float, float] = (0.15, 0.85)
+    cut_alone: tuple[float, float] = (0.35, 0.85)
     singer_edge: float = 0.04
     gaze: float = 0.3
     sings: float = 0.3
@@ -231,16 +239,17 @@ def _checks(name, rect, boxes, wanted, th, singer=None, singing=False):
             off = ((b[0] + b[2]) / 2 - (fx0 + fx1) / 2) / fw
             if abs(off) > th.alone_offset:
                 out.append(("marge", f"{wanted[0]} décentré", off))
-    lo, hi = th.cut
     tight = base.endswith(" serré")  # (a tight shot need not show its person whole)
     for n, b in boxes.items():
         if tight and n in wanted:
             continue
-        for edge in (fx0, fx1):
+        # on a shot of one person, a small piece of a neighbour is accepted (rule 3.1)
+        lo, hi = th.cut_alone if len(wanted) == 1 and n not in wanted else th.cut
+        for edge, left in ((fx0, True), (fx1, False)):
             if b[0] < edge < b[2]:
-                share = (edge - b[0]) / (b[2] - b[0])
-                if lo < share < hi:
-                    out.append(("coupé", f"{n} coupé par un bord", share))
+                inside = (b[2] - edge if left else edge - b[0]) / (b[2] - b[0])
+                if lo < inside < hi:
+                    out.append(("coupé", f"{n} coupé par un bord", inside))
                     break
         kp = b[4]
         if seen(kp, 5) and seen(kp, 6) and fx0 < shoulders_x(kp) < fx1:
@@ -283,6 +292,7 @@ def shot_alarms(
     attacks: list[float] | np.ndarray | None = None,
     offset: float = 0.0,
     thresholds: Thresholds | None = None,
+    variants: dict[str, list[tuple[float, float]]] | None = None,
 ) -> list[Alarm]:
     """Alarms of a montage, shot by shot.
 
@@ -322,6 +332,11 @@ def shot_alarms(
         Time of the montage = time of the pictures + `offset`.
     thresholds : Thresholds, optional
         The starting points.
+    variants : dict, optional
+        Variants of the catalogue for the parts of a song where the musicians stand
+        elsewhere: ``name -> [(start, end)]`` (times of the pictures), for the framings
+        named ``"<framing> (<name>)"``. Whether someone moved is judged against their
+        usual place in these parts (else in the whole song).
 
     Returns
     -------
@@ -352,9 +367,14 @@ def shot_alarms(
     th = thresholds or Thresholds()
     extend = extend or {}
     times = np.array([f["t"] + offset for f in frames])
-    usual = _usual(frames, order)
+    usuals = {None: _usual(frames, order)}
+    for v, ivs in (variants or {}).items():
+        part = [f for f in frames if any(a <= f["t"] < b for a, b in ivs)]
+        usuals[v] = _usual(part, order)
     alarms = []
     for start, end, name in shots:
+        variant = re.search(r"\(([^)]*)\)\s*$", name)
+        usual = usuals.get(variant.group(1) if variant else None, usuals[None])
         framing = framings.get(name, ("?", W / 2, H / 2, 1.0))
         rect = framing_rect(framing)
         fw = rect[2] - rect[0]
@@ -548,7 +568,8 @@ def catalogue_alarms(
     on the boxes of :func:`mediautils.catalogue.usual_places` (instruments included).
 
         >>> from mediautils.catalogue import catalogue
-        >>> places = {"A": Person(100, 700, 200, 260, 600), "B": Person(1000, 1800, 250, 300, 650)}
+        >>> places = {"A": Person(100, 700, 200, 260, 600, tight_hands=False),
+        ...           "B": Person(1000, 1800, 250, 300, 650, tight_hands=False)}
         >>> z = catalogue(places, max_zoom=8)
         >>> catalogue_alarms(z, places)
         []
@@ -559,7 +580,7 @@ def catalogue_alarms(
     The very tight shots, held back by the largest zoom (quality of the picture):
 
         >>> catalogue_alarms(catalogue(places), places)[0]
-        ('A très serré', 'pas franchement plus serré que « A serré » (zoom x1.16)')
+        ('A très serré', 'pas franchement plus serré que « A serré » (zoom x1.19)')
     """
     th = thresholds or Thresholds()
     order = list(places)

@@ -2,6 +2,12 @@
 
 from importlib.metadata import metadata
 
+from mediautils.alarms import Alarm as Alarm
+from mediautils.alarms import alarm_log as alarm_log
+from mediautils.alarms import catalogue_alarms as catalogue_alarms
+from mediautils.alarms import draw_frame as draw_frame
+from mediautils.alarms import shot_alarms as shot_alarms
+from mediautils.alarms import Thresholds as Thresholds
 from mediautils.audiosync import audio_offset as audio_offset
 from mediautils.audiosync import read_audio as read_audio
 from mediautils.audiosync import sync_videos as sync_videos
@@ -12,6 +18,12 @@ from mediautils.audit import audit_headroom as audit_headroom
 from mediautils.audit import fit_zooms as fit_zooms
 from mediautils.audit import montage_shots as montage_shots
 from mediautils.audit import vocal_entries as vocal_entries
+from mediautils.catalogue import catalogue as catalogue
+from mediautils.catalogue import Extent as Extent
+from mediautils.catalogue import framing_rect as framing_rect
+from mediautils.catalogue import intended as intended
+from mediautils.catalogue import usual_places as usual_places
+from mediautils.catalogue import variant_name as variant_name
 from mediautils.framing import framing_files as framing_files
 from mediautils.framing import framing_sheet as framing_sheet
 from mediautils.framing import interval_framings as interval_framings
@@ -29,6 +41,12 @@ from mediautils.grid import numbered_beat_markers as numbered_beat_markers
 from mediautils.grid import regular_beats as regular_beats
 from mediautils.grid import snap as snap
 from mediautils.grid import subdivide as subdivide
+from mediautils.identify import Flag as Flag
+from mediautils.identify import identify as identify
+from mediautils.identify import in_front as in_front
+from mediautils.identify import missing as missing
+from mediautils.identify import skull_lightness as skull_lightness
+from mediautils.identify import Zone as Zone
 from mediautils.livesound import denoise_rushes as denoise_rushes
 from mediautils.livesound import loudness as loudness
 from mediautils.livesound import match_eq as match_eq
@@ -47,6 +65,13 @@ from mediautils.montage import timeline_beats as timeline_beats
 from mediautils.montage import trim_project_end as trim_project_end
 from mediautils.montage import trim_project_head as trim_project_head
 from mediautils.montage import use_single_audio as use_single_audio
+from mediautils.pose import detect_poses as detect_poses
+from mediautils.pose import extract_rush_images as extract_rush_images
+from mediautils.pose import face_direction as face_direction
+from mediautils.pose import GazeScale as GazeScale
+from mediautils.pose import load_poses as load_poses
+from mediautils.pose import save_poses as save_poses
+from mediautils.pose import second_pass as second_pass
 from mediautils.shotcut import project_files as project_files
 from mediautils.shotcut import relink_project as relink_project
 from mediautils.stabilize import stabilize_video as stabilize_video

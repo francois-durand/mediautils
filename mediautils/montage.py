@@ -813,6 +813,11 @@ def build_montage(
     are left black (camera ``None`` in the result); shots shorter than `min_shot`
     are absorbed by a neighbour.
 
+    Since 2026-11-08 Claude chooses every cut himself (the code proposes candidates
+    and flags, it moves nothing: ``Règles de montage.md``): pass ``beats=[]`` and
+    ``min_shot=0`` so that the cuts stay exactly where they are given, and check the
+    result with :func:`mediautils.alarms.shot_alarms`.
+
     Parameters
     ----------
     project : SyncProject

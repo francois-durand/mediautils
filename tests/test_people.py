@@ -152,6 +152,17 @@ def test_detect_and_second_pass(pictures, tmp_path):
     )
     found = more[1]["people"][1]
     assert found["kp"][5][:2] == b["kp"][5][:2] and found["kp"][6][:2] == b["kp"][6][:2]
+    # only the bodies looked for
+    model = Model([crop_a, crop_b], [])
+    kept = second_pass(
+        frames,
+        pictures,
+        [1],
+        (1100, 200, 1920, 1080),
+        model=model,
+        keep=lambda p: p["kp"][0][0] < 1000,
+    )
+    assert len(kept[1]["people"]) == 1
 
 
 def test_keypoint_helpers():

@@ -295,6 +295,7 @@ def second_pass(
     model="yolo11m-pose.pt",
     conf: float = 0.25,
     imgsz: int = 1280,
+    keep=None,
 ) -> list[dict]:
     """Second look for the people YOLO lost where two of them overlap.
 
@@ -319,6 +320,11 @@ def second_pass(
         ``(x0, y0, x1, y1)``, pixels of the pictures.
     model, conf, imgsz
         As in :func:`detect_poses`.
+    keep : callable, optional
+        ``keep(detection) -> bool``: only the bodies looked for are added, e.g. those in
+        the zone of the person missing (``Zone.holds``). In a crop, YOLO also finds pieces
+        of the neighbours, which would otherwise compete with them (Laetitia behind her
+        cymbal, *People have the power*).
 
     Returns
     -------
@@ -342,6 +348,8 @@ def second_pass(
         found += [_unmirror(p, w, x0) for p in _people(mirror, 0, y0)]
         for p in found:
             if min(p["kp"][5][2], p["kp"][6][2]) < SEEN:
+                continue
+            if keep is not None and not keep(p):
                 continue
             if any(same_body(p["kp"], q["kp"]) for q in out[k]["people"]):
                 continue

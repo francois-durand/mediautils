@@ -400,6 +400,21 @@ def test_shot_alarms():
         ["T", "F"],
     )
     assert any(a.message.startswith("vide") for a in w)
+    assert not any("sort du cadre" in a.message for a in w)
+    # T goes a little out of the frame, on one picture only: flagged anyway
+    rows = [
+        [{**body(560), "name": "T"}, {**body(1000), "name": "F"}] for _ in range(10)
+    ]
+    rows[7][0] = {**body(530), "name": "T"}  # body 440-620, the frame starts at 450
+    out = shot_alarms(
+        plan([(0, "T-F")], 5),
+        {"T-F": ("C", 850, 540, 2.4)},
+        frames_of(*rows),
+        ["T", "F"],
+    )
+    (leaves,) = [a for a in out if a.kind == "sort"]
+    assert leaves.message.startswith("T sort du cadre (bord gauche)")
+    assert leaves.worst == 3.5
     hands = shot_alarms(
         plan([(0, "T")], 2),
         {"T": ("C", 700, 400, 3.5)},

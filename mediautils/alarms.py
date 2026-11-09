@@ -20,6 +20,8 @@ The alarms (:func:`shot_alarms`), on the pictures of each shot (named keypoints 
 - **margins**: empty space on one side of a group; a person alone off-centre; a wide
   shot with too large a margin;
 - **people cut**: someone cut in two by an edge, or a body without its head in the frame;
+  someone the shot shows going a little out of it, if only for one picture (the margin
+  must hold the people during the whole shot);
 - **the singer**: singing near an edge and turned towards it; not in the picture while
   singing;
 - **musicians**: someone of the shot hidden or not found; someone not identified in the
@@ -128,6 +130,12 @@ class Thresholds:
         A shot shorter than this (seconds) is flagged: does it make sense? (*People have
         the power*, 2026-11-08: a shot of 0.9 s kept from an older version, « je ne
         comprends pas l'intérêt de ce micro-plan ».)
+    leaves : float
+        Someone the shot shows with less than this share of his width inside the frame
+        (and more than ``cut[1]``, else he is cut) goes out of it a little: flagged even
+        for one picture, the margin must hold the people during the whole shot, unless
+        another wish goes against it (*People have the power*, 2026-11-09: Thomas going
+        out of the wide shot at the end of the clac, no alarm had sounded).
     """
 
     head_top: float = 0.06
@@ -148,6 +156,7 @@ class Thresholds:
     accent: float = 0.08
     attack: float = 0.15
     short: float = 1.5
+    leaves: float = 0.98
 
 
 @dataclass
@@ -292,6 +301,13 @@ def _checks(name, rect, boxes, wanted, th, singer=None, singing=False):
                 if lo < inside < hi:
                     out.append(("coupé", f"{n} coupé par un bord", inside))
                     break
+        # someone the shot shows (everybody on the wide shot) going a little past a side
+        # edge, if only for one picture: the margin must hold them during the whole shot
+        if n in (boxes if base == WIDE else wanted) and not (tight and n in wanted):
+            inside = _inside(b, rect)
+            if th.cut[1] <= inside < th.leaves:
+                side = "gauche" if b[0] < fx0 else "droit"
+                out.append(("sort", f"{n} sort du cadre (bord {side})", 1 - inside))
         kp = b[4]
         if seen(kp, 5) and seen(kp, 6) and fx0 < shoulders_x(kp) < fx1:
             sy = (kp[5][1] + kp[6][1]) / 2
@@ -478,7 +494,7 @@ def shot_alarms(
                 )
             )
         for (kind, msg), vs in found.items():
-            if len(vs) >= max(1, th.share * len(ks)):
+            if len(vs) >= (1 if kind == "sort" else max(1, th.share * len(ks))):
                 share = len(vs) / len(ks)
                 alarms.append(
                     Alarm(

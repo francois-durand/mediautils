@@ -9,8 +9,13 @@ Rules agreed with the user (2026-11-08, ``Règles de montage.md``, sections 3 an
   the back-and-forth is already there;
 - **why a catalogue** rather than frames shot by shot: the same intention keeps the same
   frame from one round to the next; it is light; a shot changes only by decision;
-- **normal, tight and very tight differ frankly by the zoom**, so that going from one to
-  the other shows;
+- **normal, tight and very tight are heights of the body**, what each one shows, not
+  zoom ratios set so that a chain of two of them shows (the user, 2026-11-09: that rule
+  had made the very tight shot of the singer far too tight). For the singer (Fanfan):
+  normal a little under the belt, tight a little above it, very tight a little under the
+  elbows (*Cocaine*, June 2026: zooms 1.9, 2.4, 3.0); placed with ``fixed``. For a
+  guitarist it is very different (hands and neck); the ratios ``tight`` and
+  ``very_tight`` are only the default for the others;
 - **the places come from where each one usually stands in the song**
   (:func:`usual_places`): not the mean, which a short move distorts, nor the envelope of
   their moves, which gives frames too wide;

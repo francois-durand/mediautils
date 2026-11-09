@@ -89,7 +89,13 @@ class Thresholds:
     head_top : float
         A head closer than this to the top edge (share of the frame height).
     air : float
-        More air than this above the highest head (share of the frame height).
+        More air than this above the highest head (share of the frame height). 18 % was
+        too lenient: « pas besoin d'autant de marge au-dessus de la tête » (Fanfan, *A
+        million miles away*, 2026-11-09, on a frame with 18 %); his model, the first
+        Fanfan-Laetitia of *Cocaine* (Burlingue 2026), has about 10 %.
+    wide_air : float
+        The same on the wide shot, whose height comes from its width and which keeps the
+        feet: more air is unavoidable there.
     group_side : float
         Empty space on one side of a group.
     alone_offset : float
@@ -105,7 +111,11 @@ class Thresholds:
         ambiguous (« le cul entre deux chaises »). Calibrated on *People have the power*
         (2026-11-08), where the shots on Fanfan alone always showed a bit of Thomas.
     singer_edge : float
-        The singer's head closer than this to a side edge.
+        Room in front of the singer's face (from the side of his head to the edge he
+        is turned towards) under this share of the frame width. 4 % only caught a face
+        against the edge; Fanfan asked many times for more room when he sings towards
+        an edge (« monte tes potentiomètres sur ce critère-là », 2026-11-09, on frames
+        with 10 to 16 %).
     gaze : float
         Face direction (:func:`~mediautils.pose.face_direction`) beyond which a face is
         turned to a side.
@@ -138,14 +148,15 @@ class Thresholds:
         out of the wide shot at the end of the clac, no alarm had sounded).
     """
 
-    head_top: float = 0.06
-    air: float = 0.18
+    head_top: float = 0.04
+    air: float = 0.13
+    wide_air: float = 0.18
     group_side: float = 0.12
     alone_offset: float = 0.12
     wide_side: float = 0.06
     cut: tuple[float, float] = (0.15, 0.85)
     cut_alone: tuple[float, float] = (0.35, 0.85)
-    singer_edge: float = 0.04
+    singer_edge: float = 0.20
     gaze: float = 0.3
     sings: float = 0.3
     share: float = 0.3
@@ -259,12 +270,13 @@ def _checks(name, rect, boxes, wanted, th, singer=None, singing=False):
             out.append(("tête", f"tête de {n} coupée par le bord haut", (t - fy0) / fh))
         elif (t - fy0) / fh < th.head_top:
             out.append(("tête", f"tête de {n} trop près du bord haut", (t - fy0) / fh))
-    if tops and (min(tops.values()) - fy0) / fh > th.air:
+    base = base_name(name)
+    air = th.wide_air if base == WIDE else th.air
+    if tops and (min(tops.values()) - fy0) / fh > air:
         out.append(
             ("tête", "trop d'air au-dessus des têtes", (min(tops.values()) - fy0) / fh)
         )
     group = [n for n in wanted if n in shown]
-    base = base_name(name)
     if base == WIDE:
         group = list(shown)
     if group:
@@ -378,7 +390,10 @@ def shot_alarms(
     fixed : dict, optional
         Fixed things placed once per song: ``name -> (owner, (x0, y0, x1, y1))``, e.g.
         ``{"toms": ("Laetitia", (...))}``; flagged when cut by the frame of a shot of
-        their owner.
+        their owner, or left out above or below it. A thing that must be seen in part
+        is placed as that part: on a shot meant to show Laetitia, the bottom of the
+        frame goes at least below the middle of the high tom (Fanfan, 2026-11-09), so
+        the upper half of the high tom is the thing.
     accents : array-like, optional
         Accents of the band (seconds): an accent at a cut in the middle of a phrase
         justifies it.
@@ -534,7 +549,9 @@ def shot_alarms(
                 iw = max(0.0, min(x1, rect[2]) - max(x0, rect[0]))
                 ih = max(0.0, min(y1, rect[3]) - max(y0, rect[1]))
                 share = iw * ih / max((x1 - x0) * (y1 - y0), 1)
-                if 0.05 < share < 0.95:
+                # also when the frame stops above or below it (a tom left out under the
+                # frame of a shot of Laetitia): its columns are in the frame, not it
+                if share < 0.95 and (share > 0.05 or iw > 0.5 * (x1 - x0)):
                     alarms.append(
                         Alarm(
                             start,
@@ -664,7 +681,7 @@ def catalogue_alarms(
     The very tight shots, held back by the largest zoom (quality of the picture):
 
         >>> catalogue_alarms(catalogue(places), places)[0]
-        ('A très serré', 'pas franchement plus serré que « A serré » (zoom x1.19)')
+        ('A très serré', 'pas franchement plus serré que « A serré » (zoom x1.16)')
     """
     th = thresholds or Thresholds()
     order = list(places)

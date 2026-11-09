@@ -254,7 +254,7 @@ def catalogue(
     places: dict[str, Person],
     camera: str = "L",
     margin: float = 0.04,
-    headroom: float = 0.10,
+    headroom: float = 0.08,
     wide_margin: float = 0.03,
     tight: float = 1.45,
     very_tight: float = 1.45,
@@ -274,7 +274,11 @@ def catalogue(
         Margin around what is shown, on the sides and below, as a share of the frame.
     headroom : float
         Air above the highest head, as a share of the frame height (neither "head
-        cutter" nor too much air, which cuts what matters below).
+        cutter" nor too much air, which cuts what matters below). 10 % until
+        2026-11-09: « pas besoin d'autant de marge au-dessus de la tête » (Fanfan, *A
+        million miles away*); his model, the first Fanfan-Laetitia of *Cocaine*
+        (Burlingue 2026), has about 10 % above the skull, often less on a moving
+        singer.
     wide_margin : float
         Margin of the wide shot on the sides (3 % was right at Burlingue, June 2026).
     tight, very_tight : float
@@ -313,7 +317,7 @@ def catalogue(
         >>> round(cx), round(zoom, 2), round(cy + 540 / zoom)  # the feet kept: down to the bottom
         (950, 1.06, 1080)
         >>> round(z["B serré"][3] / z["B"][3], 2), round(z["B très serré"][3] / z["B serré"][3], 2)
-        (1.45, 1.19)
+        (1.45, 1.16)
 
     The very tight shot of B is held back by the largest zoom (4 by default):
 
@@ -328,7 +332,7 @@ def catalogue(
 
         >>> z = catalogue({"G": Place(800, 1100, 250, 300, 800, hands=650)})
         >>> round(z["G"][3], 2), round(z["G serré"][3], 2)
-        (1.69, 2.3)
+        (1.73, 2.36)
         >>> framing_rect(z["G serré"])[3] >= 650
         True
     """

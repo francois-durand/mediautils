@@ -714,6 +714,24 @@ def nervous_shots(
     return shots
 
 
+def _window(cx, cy, z):
+    """Part of the 1920x1080 frame shown by a zoom `z` centred on (cx, cy): ``(x0, y0, w)``, kept inside the frame.
+
+    >>> _window(100, 540, 2.0)
+    (0, 270.0, 960.0)
+    """
+    w, h = 1920 / z, 1080 / z
+    return min(max(cx - w / 2, 0), 1920 - w), min(max(cy - h / 2, 0), 1080 - h), w
+
+
+def _window_rect(x0, y0, w, scale=1.0):
+    """``transition.rect`` showing the part ``(x0, y0, w)`` (16/9) of a 1920x1080 frame."""
+    z, s = 1920 / w, scale
+    return (
+        f"{-x0 * z * s:.1f} {-y0 * z * s:.1f} {1920 * z * s:.1f} {1080 * z * s:.1f} 1"
+    )
+
+
 def _rect(cx, cy, z, scale=1.0):
     """``transition.rect`` of a zoom `z` centred on (cx, cy) of a 1920x1080 frame.
 
@@ -722,13 +740,7 @@ def _rect(cx, cy, z, scale=1.0):
     >>> _rect(960, 540, 2.0, scale=2.0)
     '-1920.0 -1080.0 7680.0 4320.0 1'
     """
-    w, h = 1920 / z, 1080 / z
-    x0 = min(max(cx - w / 2, 0), 1920 - w)
-    y0 = min(max(cy - h / 2, 0), 1080 - h)
-    s = scale
-    return (
-        f"{-x0 * z * s:.1f} {-y0 * z * s:.1f} {1920 * z * s:.1f} {1080 * z * s:.1f} 1"
-    )
+    return _window_rect(*_window(cx, cy, z), scale)
 
 
 def _affine(
@@ -740,9 +752,12 @@ def _affine(
 
     With `z_start`, a progressive zoom from `z_start` to `z` over `frames` frames, starting centred on
     (`cx_start`, `cy_start`) if given (e.g. exactly the framing of the shot before, so that the start
-    does not jump), else on (cx, cy). The zoom follows a smooth curve, slow at both ends like a zoom by
-    hand (cosine ease-in-out: no jump of speed at the start nor at the end, Fanfan): one keyframe per
-    frame.
+    does not jump), else on (cx, cy). Each corner of the part of the frame shown goes from its start
+    to its end position as ``(1 - e) * start + e * end``, with ``e`` a smooth curve from 0 to 1, slow at
+    both ends like a zoom by hand (cosine ease-in-out: zero speed at the start and at the end, Fanfan):
+    one keyframe per frame. (Interpolating the zoom factor and the centre instead moved the corners on
+    curves: between two framings at the right edge of the frame, the right edge left it in the middle
+    of the zoom, *Argent trop cher* v07.)
 
     >>> _affine("f", 960, 540, 2.0).find("property[@name='transition.rect']").text
     '-960.0 -540.0 3840.0 2160.0 1'
@@ -751,26 +766,40 @@ def _affine(
     >>> len(keys), keys[0], keys[-1]
     (100, '0=-0.0 -0.0 1920.0 1080.0 1', '99=-960.0 -540.0 3840.0 2160.0 1')
 
-    Slow at the start: after a tenth of the time, a fortieth of the way (zoom 1.025, not 1.1):
+    Slow at the start: after a tenth of the time, a fortieth of the way (the shown width 1896, not
+    1824):
 
     >>> keys[10]
-    '10=-24.0 -13.5 1967.9 1107.0 1'
+    '10=-12.1 -6.8 1944.3 1093.7 1'
     >>> keys = _affine("f", 700, 540, 2.0, 1.5, 960, 540, frames=100).find("property[@name='transition.rect']")
     >>> keys.text.split(";")[0], keys.text.split(";")[-1]
     ('0=-480.0 -270.0 2880.0 1620.0 1', '99=-440.0 -540.0 3840.0 2160.0 1')
+
+    From the whole frame to a framing at its right edge, the right edge stays there all along:
+
+    >>> keys = _affine("f", 1600, 540, 3.0, 1.0, 960, 540, frames=50).find("property[@name='transition.rect']")
+    >>> rights = set()
+    >>> for key in keys.text.split(";"):
+    ...     x, _, w, _, _ = (float(v) for v in key.split("=")[1].split())
+    ...     rights.add(round((-x + 1920) * 1920 / w))
+    >>> rights
+    {1920}
     """
     rect = _rect(cx, cy, z, scale)
     if z_start is not None and frames > 1:
-        x0 = cx if cx_start is None else cx_start
-        y0 = cy if cy_start is None else cy_start
+        a = _window(
+            cx if cx_start is None else cx_start,
+            cy if cy_start is None else cy_start,
+            z_start,
+        )
+        b = _window(cx, cy, z)
         keys = []
         for k in range(frames):
             e = (
                 1 - math.cos(math.pi * k / (frames - 1))
             ) / 2  # 0 -> 1, zero speed at both ends
-            zk = z_start + (z - z_start) * e
             keys.append(
-                f"{k}={_rect(x0 + (cx - x0) * e, y0 + (cy - y0) * e, zk, scale)}"
+                f"{k}={_window_rect(*((1 - e) * u + e * v for u, v in zip(a, b)), scale)}"
             )
         rect = ";".join(keys)
     filt = ET.Element("filter", id=fid)

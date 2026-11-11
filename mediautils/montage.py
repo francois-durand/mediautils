@@ -1194,7 +1194,9 @@ def use_single_audio(
 
     The first audio track gets `sound`; the other audio tracks are emptied (renamed
     ``(vide)``); their cross-fades, pan filters and the chains no longer used are
-    removed. Video tracks are unchanged.
+    removed. Video tracks keep their pictures, but their sound is muted (a video track
+    may carry the sound of its camera, e.g. « Vidéo + son droite »: it would be heard
+    over the mix).
 
     Parameters
     ----------
@@ -1214,8 +1216,11 @@ def use_single_audio(
     root = tree.getroot()
     C = _clock_of(root)
     audio = [pl for pl in root.iter("playlist") if _prop(pl, "shotcut:audio") == "1"]
-    if not audio:  # sound only on the video tracks (a single camera): mute them, add an audio track
+    if (
+        not audio
+    ):  # sound only on the video tracks (a single camera): add an audio track
         audio = [_add_audio_track(root)]
+    _mute_video_tracks(root)
     removed = set()
     for pl in audio:
         for el in list(pl):
@@ -1305,13 +1310,18 @@ def add_markers(
     _write(tree, path)
 
 
-def _add_audio_track(root):
-    """Add an empty audio track to the main tractor; mute the sound of its video tracks."""
+def _mute_video_tracks(root):
+    """Mute the sound of the video tracks of the main tractor (their pictures stay)."""
     main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")
     for tr in main.findall("track"):
         pl = next((p for p in root if p.get("id") == tr.get("producer")), None)
         if pl is not None and _prop(pl, "shotcut:video") == "1":
-            tr.set("hide", "audio")
+            tr.set("hide", "both" if tr.get("hide") == "video" else "audio")
+
+
+def _add_audio_track(root):
+    """Add an empty audio track to the main tractor."""
+    main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")
     pl = ET.Element("playlist", id="playlist_audio")
     ET.SubElement(pl, "property", name="shotcut:audio").text = "1"
     ET.SubElement(pl, "property", name="shotcut:name").text = "A1"

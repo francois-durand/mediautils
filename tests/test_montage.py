@@ -261,6 +261,32 @@ def test_single_audio_single_camera(tmp_path):
     assert main.find("transition/property[@name='b_track']").text == "2"
 
 
+def test_single_audio_mutes_video_tracks(tmp_path):
+    # an audio track and a video track that carries its camera's sound (« Vidéo + son droite »):
+    # only the mix must be heard
+    text = SINGLE_CAMERA.replace(
+        '<tractor id="tractor0"',
+        '<playlist id="playlist1"><property name="shotcut:audio">1</property>'
+        '<property name="shotcut:name">A1</property>'
+        '<entry producer="chain0" in="00:00:01.001" out="00:00:10.994"/></playlist>\n'
+        '  <tractor id="tractor0"',
+    ).replace(
+        '<track producer="playlist0"/>',
+        '<track producer="playlist0"/><track producer="playlist1" hide="video"/>',
+    )
+    (tmp_path / "p.mlt").write_text(text, encoding="utf-8")
+    write_wav(tmp_path / "s.wav", np.zeros((12 * 1000, 2)), 1000)
+    use_single_audio(tmp_path / "p.mlt", tmp_path / "f.mlt", "s.wav")
+    root = ET.parse(tmp_path / "f.mlt").getroot()
+    hide = {
+        t.get("producer"): t.get("hide")
+        for t in root.find("tractor[@id='tractor0']").findall("track")
+    }
+    assert hide == {"background": None, "playlist0": "audio", "playlist1": "video"}
+    entry = root.find("playlist[@id='playlist1']/entry")
+    assert entry.get("producer") == "single_audio"
+
+
 def test_build_montage_phone(tmp_path):
     # a third source (WhatsApp video, "W") from 20 to 35 s, on its own track
     P = SyncProject(make_sync_project(tmp_path / "p.mlt", phone=(20.0, 15.0)))

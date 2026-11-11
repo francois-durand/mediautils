@@ -157,7 +157,12 @@ class SyncProject:
                 elif el.tag == "entry":
                     i = self.clock.frames(el.get("in"))
                     n = self.clock.frames(el.get("out")) - i + 1
-                    if _prop(pl, "shotcut:video") == "1":
+                    # (a cross-fade is a tractor, not a source: its sources are
+                    # around it on the same track)
+                    if (
+                        _prop(pl, "shotcut:video") == "1"
+                        and el.get("producer") in self.chains
+                    ):
                         cam = self.camera(self.resource(el.get("producer")))
                         self.segments[cam].append(
                             (pos, pos + n, el.get("producer"), pos - i)

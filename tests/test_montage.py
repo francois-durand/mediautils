@@ -8,7 +8,9 @@ import pytest
 from mediautils import (
     MltClock,
     SyncProject,
+    add_logo,
     build_montage,
+    logo_overlay,
     nervous_shots,
     resync_project,
     trim_project_end,
@@ -285,6 +287,45 @@ def test_single_audio_mutes_video_tracks(tmp_path):
     assert hide == {"background": None, "playlist0": "audio", "playlist1": "video"}
     entry = root.find("playlist[@id='playlist1']/entry")
     assert entry.get("producer") == "single_audio"
+
+
+def test_add_logo(tmp_path):
+    # the logo goes on a new video track above the last one, the audio track after it is renumbered
+    from PIL import Image
+
+    (tmp_path / "p.mlt").write_text(SINGLE_CAMERA, encoding="utf-8")
+    write_wav(tmp_path / "s.wav", np.zeros((12 * 1000, 2)), 1000)
+    use_single_audio(tmp_path / "p.mlt", tmp_path / "a.mlt", "s.wav")
+    Image.new("RGBA", (100, 50), (200, 20, 20, 255)).save(tmp_path / "logo.png")
+    logo_overlay(
+        tmp_path / "logo.png", tmp_path / "o.png", 1920, 1080, 0.1, 0.05, 0.02, 0.5
+    )
+    o = Image.open(tmp_path / "o.png")
+    assert o.size == (1920, 1080)
+    # 108 x 54 px, 54 px from the right edge, 22 from the bottom (rounded), half opacity
+    assert o.getbbox() == (1920 - 54 - 108, 1080 - 22 - 54, 1920 - 54, 1080 - 22)
+    assert o.getpixel((1800, 1030))[3] == 128
+    add_logo(tmp_path / "a.mlt", tmp_path / "l.mlt", "o.png")
+    root = ET.parse(tmp_path / "l.mlt").getroot()
+    main = root.find("tractor[@id='tractor0']")
+    assert [t.get("producer") for t in main.findall("track")] == [
+        "background",
+        "playlist0",
+        "playlist_logo",
+        "playlist_audio",
+    ]
+    tr = {
+        t.get("id"): (
+            t.find("property[@name='a_track']").text,
+            t.find("property[@name='b_track']").text,
+        )
+        for t in main.findall("transition")
+    }
+    assert tr == {"transition_audio": ("0", "3"), "transition_logo": ("1", "2")}
+    entry = root.find("playlist[@id='playlist_logo']/entry")
+    assert (entry.get("in"), entry.get("out")) == ("00:00:00.000", "00:00:09.993")
+    with pytest.raises(FileExistsError):
+        add_logo(tmp_path / "a.mlt", tmp_path / "l.mlt", "o.png")
 
 
 def test_build_montage_phone(tmp_path):

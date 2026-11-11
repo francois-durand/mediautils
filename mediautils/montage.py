@@ -1310,6 +1310,149 @@ def add_markers(
     _write(tree, path)
 
 
+def logo_overlay(
+    logo: str | os.PathLike,
+    dst: str | os.PathLike,
+    width: int,
+    height: int,
+    size: float,
+    right: float,
+    bottom: float,
+    opacity: float = 1.0,
+) -> None:
+    """Write a transparent picture of the size of the video with a logo in the bottom right corner.
+
+    Put on a top video track (:func:`add_logo`), the picture needs no scaling nor
+    positioning: the logo is drawn once, exactly. Sizes are fractions of the short side
+    of the picture (1080 in HD), so that the logo looks the same in HD, in 4K or on a
+    vertical phone video.
+
+    Parameters
+    ----------
+    logo : str | os.PathLike
+        The logo, a PNG with transparency (not modified).
+    dst : str | os.PathLike
+        The picture written (PNG, must not exist).
+    width, height : int
+        Size of the video.
+    size : float
+        Width of the logo, as a fraction of the short side.
+    right, bottom : float
+        Margins to the right and bottom edges, as fractions of the short side.
+    opacity : float
+        Opacity of the logo (1 = as in the file).
+    """
+    from PIL import Image
+
+    dst = Path(dst)
+    if dst.exists():
+        raise FileExistsError(dst)
+    short = min(width, height)
+    im = Image.open(logo).convert("RGBA")
+    w = round(size * short)
+    h = round(w * im.height / im.width)
+    # resized with premultiplied alpha, else the transparent pixels bleed into the edge
+    small = im.convert("RGBa").resize((w, h), Image.Resampling.LANCZOS).convert("RGBA")
+    if opacity != 1:
+        small.putalpha(small.getchannel("A").point(lambda v: round(v * opacity)))
+    out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    out.paste(
+        small, (width - round(right * short) - w, height - round(bottom * short) - h)
+    )
+    out.save(dst)
+
+
+def add_logo(
+    src: str | os.PathLike,
+    dst: str | os.PathLike,
+    image: str,
+    track_name: str = "Logo",
+) -> None:
+    """Write a copy of a project with a picture over the whole timeline, on a new top video track.
+
+    Meant for a logo drawn by :func:`logo_overlay` (a transparent picture of the size of
+    the video): it is shown as it is, over every camera, from the first to the last
+    frame. In Shotcut it is an ordinary clip, which can be moved or given filters.
+
+    Parameters
+    ----------
+    src : str | os.PathLike
+        The project (not modified).
+    dst : str | os.PathLike
+        The new project (must not exist); `image` must be next to it.
+    image : str
+        File name of the picture, relative to the folder of `dst`.
+    track_name : str
+        Name of the new video track.
+    """
+    src, dst = Path(src), Path(dst)
+    if dst.exists():
+        raise FileExistsError(dst)
+    tree = ET.parse(src)
+    root = tree.getroot()
+    C = _clock_of(root)
+    black = next(p for p in root if p.get("id") == "black")
+    n = C.frames(black.find("property[@name='length']").text)
+    main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")
+    prod = ET.Element(
+        "producer", id="claude_logo", **{"in": C.string(0), "out": C.string(n - 1)}
+    )
+    for k, v in [
+        ("length", C.string(n)),
+        ("eof", "pause"),
+        ("resource", image),
+        ("ttl", "1"),
+        ("aspect_ratio", "1"),
+        ("progressive", "1"),
+        ("seekable", "1"),
+        ("mlt_service", "qimage"),
+        ("shotcut:caption", image),
+    ]:
+        ET.SubElement(prod, "property", name=k).text = v
+    pl = ET.Element("playlist", id="playlist_logo")
+    ET.SubElement(pl, "property", name="shotcut:video").text = "1"
+    ET.SubElement(pl, "property", name="shotcut:name").text = track_name
+    ET.SubElement(
+        pl,
+        "entry",
+        producer="claude_logo",
+        **{"in": C.string(0), "out": C.string(n - 1)},
+    )
+    root.insert(list(root).index(main), prod)
+    root.insert(list(root).index(main), pl)
+    # the new track goes just above the last video track (Shotcut keeps the audio tracks after them)
+    tracks = main.findall("track")
+    kinds = [
+        _prop(
+            next((p for p in root if p.get("id") == t.get("producer")), t),
+            "shotcut:video",
+        )
+        for t in tracks
+    ]
+    last_video = max(i for i, k in enumerate(kinds) if k == "1")
+    pos = last_video + 1
+    for tr in main.findall("transition"):
+        for name in ("a_track", "b_track"):
+            p = tr.find(f"property[@name='{name}']")
+            if p is not None and int(p.text) >= pos:
+                p.text = str(int(p.text) + 1)
+    main.insert(
+        list(main).index(tracks[last_video]) + 1,
+        ET.Element("track", producer="playlist_logo"),
+    )
+    blend = ET.SubElement(main, "transition", id="transition_logo")
+    bottom_video = min(i for i, k in enumerate(kinds) if k == "1")
+    for k, v in [
+        ("a_track", str(bottom_video)),
+        ("b_track", str(pos)),
+        ("version", "0.1"),
+        ("mlt_service", "frei0r.cairoblend"),
+        ("threads", "0"),
+    ]:
+        ET.SubElement(blend, "property", name=k).text = v
+    _write(tree, dst)
+
+
 def _mute_video_tracks(root):
     """Mute the sound of the video tracks of the main tractor (their pictures stay)."""
     main = next(t for t in root if t.tag == "tractor" and _prop(t, "shotcut") == "1")

@@ -54,11 +54,13 @@ from mediautils.livesound import denoise_rushes as denoise_rushes
 from mediautils.livesound import loudness as loudness
 from mediautils.livesound import match_eq as match_eq
 from mediautils.livesound import mix_two_cameras as mix_two_cameras
+from mediautils.montage import add_logo as add_logo
 from mediautils.montage import add_markers as add_markers
 from mediautils.montage import build_montage as build_montage
 from mediautils.montage import contact_sheets as contact_sheets
 from mediautils.montage import export_project as export_project
 from mediautils.montage import extract_frames as extract_frames
+from mediautils.montage import logo_overlay as logo_overlay
 from mediautils.montage import MltClock as MltClock
 from mediautils.montage import nervous_shots as nervous_shots
 from mediautils.montage import resync_project as resync_project

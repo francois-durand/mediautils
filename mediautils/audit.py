@@ -80,6 +80,9 @@ def _visible(montage):
                 i0 = C.frames(el.get("in"))
                 n = C.frames(el.get("out")) - i0 + 1
                 chain = by_id[el.get("producer")]
+                if _prop(chain, "mlt_service") == "qimage":
+                    pos += n  # a still picture over the cameras (a logo) hides nothing
+                    continue
                 label = _prop(chain, "montage:shot") or P.camera(
                     _prop(chain, "resource") or ""
                 )
@@ -126,14 +129,17 @@ def _crop_rect(chain, k, C):
         C.frames(filt.get("in")) if filt.get("in") else 0
     )  # keyframes count from the filter's in-point
     rect = _prop(filt, "transition.rect")
-    if "=" in rect:  # keyframes "f0=x y w h o;f1=..." : linear interpolation
+    if (
+        "=" in rect
+    ):  # keyframes "f0=x y w h o;f1=..." : linear interpolation between them
         keys = [
-            (int(a), [float(v) for v in r.split()])
-            for a, r in (p.split("=") for p in rect.split(";"))
+            (int(a.strip("~|")), [float(v) for v in r.split()])
+            for a, r in (p.split("=") for p in rect.split(";") if p.strip())
         ]
-        (k0, r0), (k1, r1) = keys[0], keys[-1]
-        u = min(max((k - k0) / max(k1 - k0, 1), 0), 1)
-        x, y, w, h = [a + (b - a) * u for a, b in zip(r0[:4], r1[:4])]
+        x, y, w, h = (
+            float(np.interp(k, [a for a, _ in keys], [r[i] for _, r in keys]))
+            for i in range(4)
+        )
     else:
         x, y, w, h = [float(v) for v in rect.split()[:4]]
     W, H = C.size

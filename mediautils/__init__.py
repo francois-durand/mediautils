@@ -77,6 +77,15 @@ from mediautils.pose import GazeScale as GazeScale
 from mediautils.pose import load_poses as load_poses
 from mediautils.pose import save_poses as save_poses
 from mediautils.pose import second_pass as second_pass
+from mediautils.revise import compare_exports as compare_exports
+from mediautils.revise import edit_frames as edit_frames
+from mediautils.revise import marker_time as marker_time
+from mediautils.revise import montage_views as montage_views
+from mediautils.revise import move_cut as move_cut
+from mediautils.revise import read_markers as read_markers
+from mediautils.revise import ruler_image as ruler_image
+from mediautils.revise import run_export_queue as run_export_queue
+from mediautils.revise import rush_sheets as rush_sheets
 from mediautils.shotcut import project_files as project_files
 from mediautils.shotcut import relink_project as relink_project
 from mediautils.stabilize import stabilize_video as stabilize_video

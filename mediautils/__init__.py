@@ -88,7 +88,10 @@ from mediautils.revise import run_export_queue as run_export_queue
 from mediautils.revise import rush_sheets as rush_sheets
 from mediautils.shotcut import project_files as project_files
 from mediautils.shotcut import relink_project as relink_project
+from mediautils.stabilize import camera_motion as camera_motion
+from mediautils.stabilize import stabilize_handheld as stabilize_handheld
 from mediautils.stabilize import stabilize_video as stabilize_video
+from mediautils.stabilize import stabilized_sheet as stabilized_sheet
 from mediautils.voice import Voice as Voice
 
 from mediautils.file_name import file_name_to_datetime as file_name_to_datetime

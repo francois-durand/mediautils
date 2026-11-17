@@ -620,3 +620,72 @@ def rotate_video(
     clip.close()
 
     return out_path
+
+
+def mirror_video(src: str | os.PathLike, dst: str | os.PathLike, crf: int = 23) -> Path:
+    """Write a copy of a video mirrored left-right, e.g. a selfie (`src` untouched).
+
+    The picture is mirrored as it is shown (the rotation of a phone is applied first, the
+    copy has none). One encoding (x264, `crf` 23 = Shotcut's default quality), pixel format,
+    colours and the timing of every picture kept; the sound copied; the metadata of the
+    file (dates) copied. Requires ffmpeg.
+
+    Parameters
+    ----------
+    src, dst : str | os.PathLike
+        Source video, copy (must not exist).
+    crf : int
+        x264 quality.
+
+    Returns
+    -------
+    Path
+        `dst`.
+    """
+    from mediautils.stabilize import _probe
+
+    dst = Path(dst)
+    if dst.exists():
+        raise FileExistsError(dst)
+    info = _probe(src)
+    pix = info["pix_fmt"] if info["pix_fmt"] in ("yuv420p", "yuvj420p") else "yuv420p"
+    tags = {
+        "color_range": "-color_range",
+        "color_space": "-colorspace",
+        "color_transfer": "-color_trc",
+        "color_primaries": "-color_primaries",
+    }
+    colour = [a for k, v in info["colour"].items() for a in (tags[k], v)]
+    audio = ["-map", "0:a:0?", "-c:a", "copy"] if info["audio"] else []
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(src),
+            "-map",
+            "0:v:0",
+            *audio,
+            "-vf",
+            "hflip",
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            str(crf),
+            "-pix_fmt",
+            pix,
+            *colour,
+            "-map_metadata",
+            "0",
+            "-movflags",
+            "+faststart",
+            str(dst),
+        ],
+        check=True,
+    )
+    return dst

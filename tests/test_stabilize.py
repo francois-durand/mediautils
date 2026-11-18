@@ -157,6 +157,58 @@ def test_stabilize_handheld(handheld, tmp_path):
     assert "audio" in probe and "2025-11-18T16:54:54" in probe
 
 
+def test_camera_motion_zone(handheld):
+    # only the points of the left half of the first picture: the same motion
+    mats = camera_motion(handheld, smooth=0, zone=(0, 0, W // 2, H))
+    pts = np.array([[40, 30], [280, 30], [160, 150]], float)
+    m0 = np.linalg.inv(_moves()[0])
+    for n, true in enumerate(_moves()):
+        expected = (m0 @ true)[:2, :2] @ pts.T + (m0 @ true)[:2, 2:3]
+        got = mats[n][:2, :2] @ pts.T + mats[n][:2, 2:3]
+        assert np.abs(got - expected).max() < 0.6, n
+    with pytest.raises(ValueError, match="too few details"):
+        camera_motion(handheld, zone=(0, 0, 4, 4))
+
+
+def test_stabilize_handheld_mirror(handheld, tmp_path):
+    motion = camera_motion(handheld, smooth=0)
+    frame = (40, 30, 240)
+    dst = tmp_path / "miroir.mp4"
+    res = stabilize_handheld(handheld, dst, frame=frame, motion=motion, mirror=True)
+    assert res["frames"] == N
+    f = _grey_frames(dst)
+    # first picture: the frame of the mirrored first picture of the source, enlarged
+    src0 = _grey_frames(handheld)[0][:, ::-1]
+    x0, y0, fw = frame
+    fh = fw * H // W
+    want = cv2.resize(
+        np.ascontiguousarray(src0[y0 : y0 + fh, x0 : x0 + fw]),
+        (W, H),
+        interpolation=cv2.INTER_LANCZOS4,
+    )
+    assert np.abs(f[0] - want)[10:-10, 10:-10].mean() < 6
+    assert np.abs(f[0] - want[:, ::-1])[10:-10, 10:-10].mean() > 20
+    # and the scene does not move any more
+    win = cv2.createHanningWindow((W, H), cv2.CV_32F)
+    moves = [cv2.phaseCorrelate(f[0], f[n], win)[0] for n in range(1, N)]
+    assert np.abs(moves).max() < 0.8
+
+
+def test_stabilize_handheld_follow(handheld, tmp_path):
+    motion = camera_motion(handheld, smooth=0)
+    fixed = stabilize_handheld(handheld, tmp_path / "fixe.mp4", motion=motion)
+    # σ = 0.1 s = 2.5 pictures: the camera follows the moves of the video (periods of
+    # 30-45 pictures), so it crops much less, and the picture still moves
+    soft = stabilize_handheld(
+        handheld, tmp_path / "souple.mp4", motion=motion, follow=0.1
+    )
+    assert soft["zoom"] < fixed["zoom"] - 0.1
+    f = _grey_frames(tmp_path / "souple.mp4")
+    win = cv2.createHanningWindow((W, H), cv2.CV_32F)
+    moves = [cv2.phaseCorrelate(f[0], f[n], win)[0] for n in range(1, N)]
+    assert np.abs(moves).max() > 3
+
+
 def test_stabilized_sheet(handheld, tmp_path):
     out = tmp_path / "planche → cadre.jpg"
     assert stabilized_sheet(handheld, out, frame=(40, 30, 240), step=0.4) == out

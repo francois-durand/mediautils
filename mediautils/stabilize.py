@@ -372,7 +372,10 @@ def _smooth_motion(mats, size, sigma) -> np.ndarray:
 
 
 def camera_motion(
-    src: str | os.PathLike, smooth: float = 3.0, points: int = 2500
+    src: str | os.PathLike,
+    smooth: float = 3.0,
+    points: int = 2500,
+    zone: tuple[int, int, int, int] | None = None,
 ) -> np.ndarray:
     """Motion of a camera held by hand: the similarity sending each picture onto the first one.
 
@@ -394,6 +397,11 @@ def camera_motion(
         σ of the smoothing, in frames (0: none).
     points : int
         Number of points followed.
+    zone : (int, int, int, int), optional
+        ``(x0, y0, x1, y1)`` in pixels of the first picture of `src` (as decoded, not
+        mirrored): follow only the points of this part of the scene, e.g. the far background
+        of a selfie (near things and the background do not move alike when the camera moves).
+        It must stay in view.
 
     Returns
     -------
@@ -414,7 +422,11 @@ def camera_motion(
         g = buf.reshape(h, w)
         if g0 is None:
             g0 = prev = g
-            p0 = cv2.goodFeaturesToTrack(g0, points, 0.005, 12)
+            mask = None
+            if zone is not None:
+                mask = np.zeros_like(g0)
+                mask[zone[1] : zone[3], zone[0] : zone[2]] = 255
+            p0 = cv2.goodFeaturesToTrack(g0, points, 0.005, 12, mask=mask)
             if p0 is None or len(p0) < 50:
                 raise ValueError(
                     f"too few details to follow in the first picture of {src}"
@@ -470,6 +482,38 @@ def camera_motion(
     return _smooth_motion(np.array(mats), (w, h), smooth)
 
 
+def _mirror(mats, w, mirror) -> tuple[np.ndarray, np.ndarray]:
+    """Motion of the mirrored video and the mirror to apply to each picture (identity if not).
+
+    >>> mats, flip = _mirror(np.array([np.eye(3) + [[0, 0, 5], [0, 0, 0], [0, 0, 0]]]), 10, True)
+    >>> mats[0][0].tolist(), flip[0].tolist()
+    ([1.0, 0.0, -5.0], [-1.0, 0.0, 9.0])
+    """
+    if not mirror:
+        return mats, np.eye(3)
+    flip = np.array([[-1.0, 0, w - 1], [0, 1, 0], [0, 0, 1]])
+    return flip @ mats @ flip, flip
+
+
+def _follow(mats, size, follow, fps) -> np.ndarray:
+    """Motion onto a camera following the slow moves (path smoothed over `follow` s), or `mats`.
+
+    A slow drift of 10 px per picture, followed over a long time: only the gaps to its mean
+    path are left.
+
+    >>> mats = np.array([np.eye(3) + [[0, 0, x], [0, 0, 0], [0, 0, 0]] for x in (0, 10, 20)])
+    >>> (_follow(mats, (1920, 1080), 100, "1/1")[:, 0, 2].round(1) + 0.0).tolist()
+    [-9.9, 0.0, 9.9]
+    >>> _follow(mats, (1920, 1080), 0, "30/1") is mats
+    True
+    """
+    if not follow:
+        return mats
+    num, den = (int(v) for v in fps.split("/"))
+    path = _smooth_motion(mats, size, follow * num / den)
+    return np.linalg.inv(path) @ mats
+
+
 def _frame_margin(mats, frame, size) -> tuple[float, int]:
     """Smallest distance (px) between the frame and the edges of the pictures, and where.
 
@@ -522,6 +566,8 @@ def stabilize_handheld(
     smooth: float = 3.0,
     crf: int = 23,
     motion: np.ndarray | None = None,
+    mirror: bool = False,
+    follow: float = 0.0,
 ) -> dict:
     """Write a stabilized and cropped copy of a video held by hand (`src` untouched).
 
@@ -549,6 +595,14 @@ def stabilize_handheld(
         x264 quality.
     motion : numpy.ndarray, optional
         ``camera_motion(src, smooth)``, measured once to try several frames.
+    mirror : bool
+        Also mirror the picture left-right (a selfie), in the same resampling; `frame` is
+        then given in the mirrored first picture (`motion` stays the one of `src`).
+    follow : float
+        0: the camera is fixed on the scene. Otherwise, in seconds: the camera follows the
+        slow moves of the video (its path smoothed over `follow` s, Gaussian σ) and only the
+        shakes are removed; it crops much less when the video drifts (a selfie). `frame` is
+        then given in pictures of this smoothed camera (close to the original pictures).
 
     Returns
     -------
@@ -565,6 +619,8 @@ def stabilize_handheld(
     info = _probe(src)
     w, h = info["size"]
     mats = camera_motion(src, smooth) if motion is None else np.asarray(motion, float)
+    mats, flip = _mirror(mats, w, mirror)
+    mats = _follow(mats, (w, h), follow, info["fps"])
     if frame is None:
         frame = _auto_frame(mats, (w, h))
     margin, worst = _frame_margin(mats, frame, (w, h))
@@ -633,7 +689,7 @@ def stabilize_handheld(
     lanczos = {"flags": cv2.INTER_LANCZOS4, "borderMode": cv2.BORDER_REPLICATE}
     n = 0
     for buf in _raw_frames(src, (w, h), pix):
-        m = crop @ mats[min(n, len(mats) - 1)]
+        m = crop @ mats[min(n, len(mats) - 1)] @ flip
         mh = half @ m @ np.linalg.inv(half)
         y = buf[: w * h].reshape(h, w)
         u = buf[w * h : w * h * 5 // 4].reshape(h // 2, w // 2)
@@ -665,6 +721,8 @@ def stabilized_sheet(
     cols: int = 4,
     width: int = 640,
     motion: np.ndarray | None = None,
+    mirror: bool = False,
+    follow: float = 0.0,
 ) -> Path:
     """Sheet of stabilized pictures (whole, in the coordinates of the first one) with the frame
     drawn in red, every `step` seconds: to check a frame before :func:`stabilize_handheld`.
@@ -676,6 +734,8 @@ def stabilized_sheet(
     info = _probe(src)
     w, h = info["size"]
     mats = camera_motion(src, smooth) if motion is None else np.asarray(motion, float)
+    mats, flip = _mirror(mats, w, mirror)
+    mats = _follow(mats, (w, h), follow, info["fps"])
     if frame is None:
         frame = _auto_frame(mats, (w, h))
     x0, y0, fw = frame
@@ -686,7 +746,7 @@ def stabilized_sheet(
         if n % every:
             continue
         bgr = cv2.cvtColor(buf.reshape(h * 3 // 2, w), cv2.COLOR_YUV2BGR_I420)
-        img = cv2.warpPerspective(bgr, mats[min(n, len(mats) - 1)], (w, h))
+        img = cv2.warpPerspective(bgr, mats[min(n, len(mats) - 1)] @ flip, (w, h))
         thick = max(w // 320, 2)
         cv2.rectangle(
             img,

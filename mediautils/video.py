@@ -4,6 +4,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from shutil import copy2
@@ -590,14 +591,17 @@ def rotate_video(
     out_dir: str | os.PathLike = "out",
     out_name: str | None = None,
 ) -> Path:
-    """Write a rotated copy of a video.
+    """Write a rotated copy of a video, re-encoded with moviepy (older; prefer :func:`turn_video`).
+
+    The picture is re-encoded and the metadata of the file (dates) is lost; :func:`turn_video`
+    turns a video without re-encoding and keeps everything.
 
     Parameters
     ----------
     path : str | os.PathLike
         Path to the source video.
     angle : int
-        Rotation angle in degrees (90, 180, or 270).
+        Rotation angle in degrees (90, 180, or 270), **counterclockwise** (moviepy's way).
     out_dir : str | os.PathLike
         Directory where the rotated video is saved. Created if it does not exist.
     out_name : str | None
@@ -620,6 +624,72 @@ def rotate_video(
     clip.close()
 
     return out_path
+
+
+def _exiftool_argfile(args: list[str]) -> str:
+    """Run exiftool with its arguments in a UTF-8 argument file; return its output.
+
+    Paths with characters outside the ANSI code page (e.g. « → ») are misread on Windows
+    when given on the command line.
+    """
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", suffix=".args", delete=False
+    ) as f:
+        f.write("\n".join(args) + "\n")
+    try:
+        return subprocess.run(
+            ["exiftool", "-charset", "filename=utf8", "-@", f.name],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout
+    finally:
+        os.unlink(f.name)
+
+
+def turn_video(
+    src: str | os.PathLike, dst: str | os.PathLike, clockwise: int = 90
+) -> Path:
+    """Write a copy of a video turned by quarter turns, without re-encoding (`src` untouched).
+
+    The pictures are not touched: the copy is the same file with another display rotation
+    (the matrix of the video track, written by exiftool), which players, Shotcut and YouTube
+    follow — as a phone does when filming upright. Nothing is lost: quality, sound, dates and
+    maker blocks (e.g. Lumix) are kept. The turn adds to the rotation the file may already
+    have. Requires exiftool.
+
+    Parameters
+    ----------
+    src, dst : str | os.PathLike
+        Source video, copy (must not exist).
+    clockwise : int
+        Turn in degrees, clockwise as the picture is seen: 90, 180, 270 (or -90...).
+
+    Returns
+    -------
+    Path
+        `dst`.
+    """
+    if clockwise % 90:
+        raise ValueError(f"A video turns by quarter turns, not {clockwise}°")
+    dst = Path(dst)
+    if dst.exists():
+        raise FileExistsError(dst)
+    copy2(src, dst)
+    try:
+        before = int(_exiftool_argfile(["-s3", "-n", "-Rotation", str(dst)]) or 0)
+        wanted = (before + clockwise) % 360
+        _exiftool_argfile(
+            ["-q", "-overwrite_original", "-P", f"-Rotation={wanted}", str(dst)]
+        )
+        after = int(_exiftool_argfile(["-s3", "-n", "-Rotation", str(dst)]) or 0)
+        if after != wanted:
+            raise RuntimeError(f"{dst}: rotation {after}° read back, {wanted}° wanted")
+    except BaseException:
+        dst.unlink(missing_ok=True)
+        raise
+    return dst
 
 
 def mirror_video(src: str | os.PathLike, dst: str | os.PathLike, crf: int = 23) -> Path:

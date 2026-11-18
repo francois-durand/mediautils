@@ -111,6 +111,7 @@ from mediautils.image import set_time_image as set_time_image
 from mediautils.image import set_time_raw as set_time_raw
 from mediautils.video import mirror_video as mirror_video
 from mediautils.video import rotate_video as rotate_video
+from mediautils.video import turn_video as turn_video
 from mediautils.video import set_all_dates_video as set_all_dates_video
 from mediautils.video import write_precise_start as write_precise_start
 from mediautils.media import gather_yes_no as gather_yes_no

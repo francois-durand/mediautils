@@ -231,6 +231,19 @@ def test_write_precise_start(tmp_path):
     assert out[:3] == ["2025:04:05 20:55:22.668+02:00", "25Timecode", "20:55:22:17"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows only")
+def test_set_file_creation_time_while_read(tmp_path):
+    """Another process reading the file (Dropbox, antivirus) does not block it."""
+    from mediautils.image import set_file_creation_time
+
+    path = tmp_path / "lu ailleurs.mp4"
+    path.write_bytes(b"x" * 100)
+    dt = datetime(2019, 1, 3, 18, 49, 39)
+    with open(path, "rb"):
+        set_file_creation_time(path, dt)
+    assert os.stat(path).st_birthtime == dt.timestamp()
+
+
 def test_command_line_interface():
     """Test the CLI."""
     runner = CliRunner()

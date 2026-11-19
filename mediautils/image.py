@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -93,15 +94,27 @@ def set_file_creation_time(path: str | os.PathLike, dt: datetime) -> None:
     import win32con
     import win32file
 
-    handle = win32file.CreateFile(
-        str(path),
-        win32con.GENERIC_WRITE,
-        win32con.FILE_SHARE_WRITE,
-        None,
-        win32con.OPEN_EXISTING,
-        0,
-        None,
-    )
+    # Only the attributes are written, and other processes may keep reading the
+    # file meanwhile (Dropbox or an antivirus often open a new file to read it):
+    # a sharing violation is retried for a few seconds.
+    for attempt in range(20):
+        try:
+            handle = win32file.CreateFile(
+                str(path),
+                0x100,  # FILE_WRITE_ATTRIBUTES
+                win32con.FILE_SHARE_READ
+                | win32con.FILE_SHARE_WRITE
+                | win32con.FILE_SHARE_DELETE,
+                None,
+                win32con.OPEN_EXISTING,
+                0,
+                None,
+            )
+            break
+        except pywintypes.error as error:
+            if error.winerror != 32 or attempt == 19:  # 32: sharing violation
+                raise
+            time.sleep(0.25)
     try:
         win32file.SetFileTime(handle, pywintypes.Time(dt), None, None)
     finally:

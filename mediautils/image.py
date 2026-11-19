@@ -1,12 +1,13 @@
 import os
 import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from exif import DATETIME_STR_FORMAT, Image as ExifImage
 from PIL import Image as PILImage
+
+from mediautils._exiftool import run_exiftool
 
 _EXIF_ORIENTATION_TAG = 0x0112
 
@@ -201,14 +202,13 @@ def set_time_raw(
     out_path = out_dir / (out_name or path.name)
     shutil.copy2(path, out_path)
     args = [
-        "exiftool",
         "-overwrite_original",
         f"-DateTimeOriginal={dt.strftime('%Y:%m:%d %H:%M:%S')}",
     ]
     if offset is not None:
         args.append(f"-OffsetTimeOriginal={offset}")
     args.append(str(out_path))
-    subprocess.run(args, check=True, capture_output=True)
+    run_exiftool(args)
     return out_path
 
 

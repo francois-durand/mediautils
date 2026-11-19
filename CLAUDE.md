@@ -74,7 +74,7 @@ The user runs these functions through `.bat` files (one-liners `uv run --project
 
 ## Pitfalls
 
-- exiftool on Windows misreads command-line paths with characters outside the ANSI code page (e.g. "→" in folder names): pass such paths through an argument file (`-charset filename=utf8 -@ file`).
+- exiftool on Windows misreads command-line paths with characters outside the ANSI code page (e.g. "→" in folder names): pass such paths through an argument file (`-charset filename=utf8 -@ file`). Every exiftool call goes through `mediautils._exiftool.run_exiftool(args)`, which does this; never call exiftool with `subprocess` directly.
 - exiftool `-overwrite_original` rewrites the file and resets its modification time unless `-P` is given.
 - ffmpeg cannot write a file onto itself (`-i X ... -y X` fails): write to a temporary file.
 - Phones and cameras often record the **end** of a video in its metadata, and old renamings sometimes took that end time: check against the duration before trusting a date.

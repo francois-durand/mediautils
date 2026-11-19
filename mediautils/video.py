@@ -4,7 +4,6 @@ import re
 import struct
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from shutil import copy2
@@ -12,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from moviepy import VideoFileClip
 
+from mediautils._exiftool import run_exiftool
 from mediautils.image import set_file_creation_time
 
 _EXIFTOOL_DATE = re.compile(r"^\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}")
@@ -134,21 +134,10 @@ def _read_date_list_tags(path: Path) -> dict[str, list]:
 
 def _read_time_tags(path: Path) -> dict:
     """Read the embedded tags of the exiftool "time" group of a file."""
-    result = subprocess.run(
-        [
-            "exiftool",
-            "-j",
-            "-a",
-            "-G1",
-            "-time:all",
-            "-api",
-            "QuickTimeUTC=1",
-            str(path),
-        ],
-        check=True,
-        capture_output=True,
+    output = run_exiftool(
+        ["-j", "-a", "-G1", "-time:all", "-api", "QuickTimeUTC=1", str(path)]
     )
-    tags = json.loads(result.stdout.decode("utf-8"))[0]
+    tags = json.loads(output)[0]
     return {
         name: value
         for name, value in tags.items()
@@ -207,13 +196,9 @@ def _wall_clock(name: str, value: str, file_offset: str | None) -> datetime | No
 
 def _read_file_offset(path: Path) -> str | None:
     """Read the UTC offset a camera recorded in a file (``OffsetTime``), if any."""
-    result = subprocess.run(
-        ["exiftool", "-s3", "-OffsetTimeOriginal", "-OffsetTime", str(path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    lines = result.stdout.split()
+    lines = run_exiftool(
+        ["-s3", "-OffsetTimeOriginal", "-OffsetTime", str(path)]
+    ).split()
     return lines[0] if lines else None
 
 
@@ -347,11 +332,7 @@ def _set_all_dates_video(
     if any(name.startswith(_PANTRY_PREFIX) for name in before):
         # Adobe's copy of the metadata of the source files of a montage: their
         # dates are not those of this video, and exiftool cannot write them.
-        subprocess.run(
-            ["exiftool", "-overwrite_original", "-XMP-xmpMM:Pantry=", str(out_path)],
-            check=True,
-            capture_output=True,
-        )
+        run_exiftool(["-overwrite_original", "-XMP-xmpMM:Pantry=", str(out_path)])
         before = _read_date_tags(out_path)
     lists = {
         name: value
@@ -364,12 +345,10 @@ def _set_all_dates_video(
     # second they carry (see :func:`write_precise_start`).
     to_write = [name for name, read in before.items() if not _holds(read, dt, aware)]
     if to_write:
-        subprocess.run(
-            ["exiftool", "-overwrite_original", "-api", "QuickTimeUTC=1"]
+        run_exiftool(
+            ["-overwrite_original", "-api", "QuickTimeUTC=1"]
             + [f"-{name}={value}" for name in to_write]
-            + [str(out_path)],
-            check=True,
-            capture_output=True,
+            + [str(out_path)]
         )
     unwritable, wrong = {}, {}
     for name, read in _read_date_tags(out_path).items():
@@ -577,12 +556,8 @@ def write_precise_start(
                 f"-XMP-xmpDM:StartTimecodeTimeFormat#={tc[0]}",
                 f"-XMP-xmpDM:StartTimecodeTimeValue={tc[1]}",
             ]
-    subprocess.run(
-        # -P: keep the filesystem modification time of the file.
-        ["exiftool", "-overwrite_original", "-P", *args, str(path)],
-        check=True,
-        capture_output=True,
-    )
+    # -P: keep the filesystem modification time of the file.
+    run_exiftool(["-overwrite_original", "-P", *args, str(path)])
 
 
 def rotate_video(
@@ -626,28 +601,6 @@ def rotate_video(
     return out_path
 
 
-def _exiftool_argfile(args: list[str]) -> str:
-    """Run exiftool with its arguments in a UTF-8 argument file; return its output.
-
-    Paths with characters outside the ANSI code page (e.g. « → ») are misread on Windows
-    when given on the command line.
-    """
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", suffix=".args", delete=False
-    ) as f:
-        f.write("\n".join(args) + "\n")
-    try:
-        return subprocess.run(
-            ["exiftool", "-charset", "filename=utf8", "-@", f.name],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=True,
-        ).stdout
-    finally:
-        os.unlink(f.name)
-
-
 def turn_video(
     src: str | os.PathLike, dst: str | os.PathLike, clockwise: int = 90
 ) -> Path:
@@ -678,12 +631,12 @@ def turn_video(
         raise FileExistsError(dst)
     copy2(src, dst)
     try:
-        before = int(_exiftool_argfile(["-s3", "-n", "-Rotation", str(dst)]) or 0)
+        before = int(run_exiftool(["-s3", "-n", "-Rotation", str(dst)]) or 0)
         wanted = (before + clockwise) % 360
-        _exiftool_argfile(
+        run_exiftool(
             ["-q", "-overwrite_original", "-P", f"-Rotation={wanted}", str(dst)]
         )
-        after = int(_exiftool_argfile(["-s3", "-n", "-Rotation", str(dst)]) or 0)
+        after = int(run_exiftool(["-s3", "-n", "-Rotation", str(dst)]) or 0)
         if after != wanted:
             raise RuntimeError(f"{dst}: rotation {after}° read back, {wanted}° wanted")
     except BaseException:

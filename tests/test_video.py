@@ -1,10 +1,19 @@
 import shutil
 import subprocess
+from datetime import datetime
 
 import numpy as np
 import pytest
+from PIL import Image
 
-from mediautils import mirror_video, turn_video
+from mediautils import (
+    mirror_video,
+    set_all_dates_video,
+    set_time_raw,
+    turn_video,
+    write_precise_start,
+)
+from mediautils._exiftool import run_exiftool
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None, reason="ffmpeg is needed"
@@ -126,3 +135,40 @@ def test_turn_video(tmp_path):
     ).stdout  # fmt: skip
     assert f"video,{W},{H}" in probe and "audio" in probe
     assert "2026-06-12T18:43:08" in probe
+
+
+@pytest.mark.skipif(shutil.which("exiftool") is None, reason="exiftool is needed")
+def test_dates_paths_outside_ansi(tmp_path):
+    """« → » in the folders (Windows: outside the ANSI code page) does not stop exiftool."""
+    src_dir = tmp_path / "01_À renommer et-ou retagguer (→ 02)"
+    out_dir = tmp_path / "02_Datées (→ 03)"
+    src_dir.mkdir()
+    src = src_dir / "VID → 20190924_162534.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:d=0.4",
+            "-metadata", "creation_time=2001-01-01T00:00:00Z", str(src),
+        ],
+        check=True,
+    )  # fmt: skip
+    dt = datetime(2019, 9, 24, 16, 25, 34)
+
+    out, unwritable = set_all_dates_video(src, dt, out_dir)
+    assert out == out_dir / src.name and unwritable == {}
+    stored = run_exiftool(
+        ["-s3", "-api", "QuickTimeUTC=0", "-QuickTime:CreateDate", str(out)]
+    )
+    assert stored.strip() == "2019:09:24 14:25:34"  # 16:25:34 in Paris, summer time
+    assert datetime.fromtimestamp(out.stat().st_mtime) == dt
+
+    write_precise_start(out, dt.replace(microsecond=668000), frame_rate=25)
+    shot = run_exiftool(["-s3", "-XMP-xmpDM:ShotDate", str(out)])
+    assert shot.strip() == "2019:09:24 16:25:34.668+02:00"
+
+    jpg = src_dir / "IMG → 1.jpg"
+    Image.new("RGB", (8, 8)).save(jpg)
+    raw = set_time_raw(jpg, dt, out_dir, offset="+02:00")
+    original = run_exiftool(
+        ["-s3", "-DateTimeOriginal", "-OffsetTimeOriginal", str(raw)]
+    )
+    assert original.split() == ["2019:09:24", "16:25:34", "+02:00"]
